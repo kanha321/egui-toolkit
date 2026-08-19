@@ -3,11 +3,11 @@
 use crate::params::SpringParams;
 use crate::solver::solve_step;
 
-/// Position threshold for settling in logical units (default: `0.001`).
-pub const DEFAULT_SETTLE_DISTANCE: f32 = 0.001;
+/// Position threshold for settling in logical units (default: `0.005`).
+pub const DEFAULT_SETTLE_DISTANCE: f32 = 0.005;
 
-/// Velocity threshold for settling in logical units per second (default: `0.01`).
-pub const DEFAULT_SETTLE_VELOCITY: f32 = 0.01;
+/// Velocity threshold for settling in logical units per second (default: `0.05`).
+pub const DEFAULT_SETTLE_VELOCITY: f32 = 0.05;
 
 /// A 1D analytical spring state type.
 ///

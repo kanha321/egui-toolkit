@@ -186,17 +186,17 @@ impl CornerSprings {
             if travel_dir != Vec2::ZERO {
                 let alignment = travel_dir.dot(corner_dirs[i]);
 
-                // Leading corners gain stiffness to lead the stretch
+                // Leading corners stretch forward smoothly without slowing trailing corners
                 let factor = if alignment > 0.0 {
-                    1.0 + alignment * 0.5
+                    1.0 + alignment * 0.45
                 } else {
-                    1.0 + alignment * 0.25
+                    1.0
                 };
                 corner_params.angular_frequency = self.params.angular_frequency * factor;
 
                 // Slightly lower damping on leading corners to enhance dynamic elastic stretch
                 if alignment > 0.0 {
-                    corner_params.damping_ratio = (step_base_damping * (1.0 - alignment * 0.12 * log_factor)).max(0.1);
+                    corner_params.damping_ratio = (step_base_damping * (1.0 - alignment * 0.15 * log_factor)).max(0.1);
                 } else {
                     corner_params.damping_ratio = step_base_damping;
                 }

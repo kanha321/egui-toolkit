@@ -10,9 +10,9 @@ use spring_core::{Spring, SpringParams};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum HighlightPreset {
     Gentle,
-    #[default]
     Snappy,
     Bouncy,
+    #[default]
     OpenRGB,
     Custom,
 }
@@ -26,6 +26,7 @@ pub struct SpringDemoState {
     pub custom_spring: Spring,
     pub custom_frequency: f32,
     pub custom_damping: f32,
+    pub speed_scale: f32,
     pub target_val: f32,
     pub history_gentle: Vec<f32>,
     pub history_snappy: Vec<f32>,
@@ -46,9 +47,10 @@ impl Default for SpringDemoState {
             snappy_spring: Spring::new(initial_target, SpringParams::snappy()),
             bouncy_spring: Spring::new(initial_target, SpringParams::bouncy()),
             openrgb_spring: Spring::new(initial_target, SpringParams::openrgb()),
-            custom_spring: Spring::new(initial_target, SpringParams::new(20.0, 0.4)),
-            custom_frequency: 20.0,
-            custom_damping: 0.4,
+            custom_spring: Spring::new(initial_target, SpringParams::new(32.0, 0.55)),
+            custom_frequency: 32.0,
+            custom_damping: 0.55,
+            speed_scale: 1.0,
             target_val: initial_target,
             history_gentle: Vec::new(),
             history_snappy: Vec::new(),
@@ -84,7 +86,8 @@ impl SpringDemoState {
         self.custom_spring.velocity += velocity;
     }
 
-    pub fn update(&mut self, dt: f32) {
+    pub fn update(&mut self, raw_dt: f32) {
+        let dt = raw_dt * self.speed_scale;
         self.custom_spring.params = SpringParams::new(self.custom_frequency, self.custom_damping);
 
         // Sync active highlight preset parameters and matching colors
@@ -141,8 +144,8 @@ impl SpringDemoState {
 }
 
 pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
-    let dt = ui.input(|i| i.stable_dt).min(0.05);
-    state.update(dt);
+    let raw_dt = ui.input(|i| i.stable_dt).min(0.05);
+    state.update(raw_dt);
 
     // Continuous motion repaint rule (CODING_RULES §4):
     if state.is_animating() {
@@ -186,7 +189,7 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
     let track_height = 32.0;
     render_spring_track(
         ui,
-        "🟣 Gentle Preset (ω0 = 14, ζ = 0.90)",
+        "🟣 Gentle (ω0 = 24, ζ = 0.88)",
         state.gentle_spring.value(),
         state.gentle_spring.velocity(),
         state.target_val,
@@ -198,7 +201,7 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
     ui.add_space(2.0);
     render_spring_track(
         ui,
-        "🟢 Snappy Preset (ω0 = 28, ζ = 0.85)",
+        "🟢 Snappy (ω0 = 38, ζ = 0.82)",
         state.snappy_spring.value(),
         state.snappy_spring.velocity(),
         state.target_val,
@@ -210,7 +213,7 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
     ui.add_space(2.0);
     render_spring_track(
         ui,
-        "🟠 Bouncy Preset (ω0 = 18, ζ = 0.50)",
+        "🟠 Bouncy (ω0 = 28, ζ = 0.48)",
         state.bouncy_spring.value(),
         state.bouncy_spring.velocity(),
         state.target_val,
@@ -222,7 +225,7 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
     ui.add_space(2.0);
     render_spring_track(
         ui,
-        "💚 OpenRGB / Neovide Preset (ω0 = 22, ζ = 0.65)",
+        "💚 OpenRGB / Neovide (ω0 = 32, ζ = 0.65)",
         state.openrgb_spring.value(),
         state.openrgb_spring.velocity(),
         state.target_val,
@@ -362,7 +365,8 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
     ui.columns(2, |cols| {
         cols[0].group(|ui| {
             ui.label(egui::RichText::new("⚙️ Live Parameter Tuning").strong());
-            ui.add(egui::Slider::new(&mut state.custom_frequency, 2.0..=50.0).text("Frequency ω0 (rad/s)"));
+            ui.add(egui::Slider::new(&mut state.speed_scale, 0.5..=3.0).text("Speed Scale (Multiplier)").suffix("x"));
+            ui.add(egui::Slider::new(&mut state.custom_frequency, 5.0..=60.0).text("Frequency ω0 (rad/s)"));
             ui.add(egui::Slider::new(&mut state.custom_damping, 0.05..=2.5).text("Damping Ratio ζ"));
             ui.label(format!("Status: {}", if state.is_animating() { "⚡ Active Motion (repainting)" } else { "✓ Settled" }));
         });
