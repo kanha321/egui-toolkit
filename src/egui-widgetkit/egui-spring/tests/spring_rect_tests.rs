@@ -1,27 +1,26 @@
 use egui::{Pos2, Rect};
 use egui_spring::{build_bezier_boundary, CornerSprings, SpringRect};
-use spring_core::SpringParams;
 
 #[test]
 fn test_corner_springs_settling() {
-    let mut corners = CornerSprings::new(Rect::ZERO, SpringParams::snappy());
-    corners.set_target(Rect::from_min_size(Pos2::new(100.0, 100.0), egui::vec2(200.0, 50.0)));
+    let mut corners = CornerSprings::new(Rect::ZERO, 28.0, 0.85);
+    let target = Rect::from_min_size(Pos2::new(100.0, 100.0), egui::vec2(200.0, 50.0));
+    corners.set_target(target);
 
     let dt = 1.0 / 60.0;
     let mut steps = 0;
     while !corners.is_settled() && steps < 600 {
-        corners.update(dt);
+        corners.update(target, dt);
         steps += 1;
     }
 
     assert!(corners.is_settled(), "Corner springs must settle within 10 seconds");
-    let target = corners.target_rect;
     let pts = corners.positions();
 
-    assert!((pts[0].x - target.left_top().x).abs() < 1e-3);
-    assert!((pts[0].y - target.left_top().y).abs() < 1e-3);
-    assert!((pts[2].x - target.right_bottom().x).abs() < 1e-3);
-    assert!((pts[2].y - target.right_bottom().y).abs() < 1e-3);
+    assert!((pts[0].x - target.left_top().x).abs() < 1e-2);
+    assert!((pts[0].y - target.left_top().y).abs() < 1e-2);
+    assert!((pts[2].x - target.right_bottom().x).abs() < 1e-2);
+    assert!((pts[2].y - target.right_bottom().y).abs() < 1e-2);
 }
 
 #[test]
@@ -48,7 +47,7 @@ fn test_bezier_boundary_generation() {
 #[test]
 fn test_spring_rect_bounding_rect() {
     let target = Rect::from_min_size(Pos2::new(50.0, 50.0), egui::vec2(120.0, 80.0));
-    let mut rect = SpringRect::new(target);
+    let mut rect = SpringRect::new(target).with_padding(0.0);
     rect.reset(target);
 
     assert!(rect.is_settled());

@@ -18,23 +18,22 @@ pub struct SpringPoint {
 
 impl SpringPoint {
     /// Creates a new `SpringPoint` at the specified position.
-    pub fn new(pos: Pos2, params: SpringParams) -> Self {
+    pub fn new(pos: Pos2, stiffness: f32, damping: f32) -> Self {
+        let params = SpringParams::new(stiffness, damping);
         Self {
             x: Spring::new(pos.x, params),
             y: Spring::new(pos.y, params),
         }
     }
 
-    /// Advances the point simulation by delta time `dt`.
-    pub fn update(&mut self, dt: f32) {
-        self.x.update(dt);
-        self.y.update(dt);
-    }
-
-    /// Sets the target position without zeroing existing velocity.
-    pub fn set_target(&mut self, target: Pos2) {
+    /// Advances the point simulation towards target with overridden stiffness and damping.
+    pub fn update(&mut self, target: Pos2, dt: f32, stiffness: f32, damping: f32) {
+        self.x.params = SpringParams::new(stiffness, damping);
+        self.y.params = SpringParams::new(stiffness, damping);
         self.x.set_target(target.x);
         self.y.set_target(target.y);
+        self.x.update(dt);
+        self.y.update(dt);
     }
 
     /// Teleports the point immediately and zeroes velocity.
@@ -61,43 +60,43 @@ impl SpringPoint {
 
 /// A set of four independent corner springs driving an elastic rectangle.
 ///
-/// Corners leading in the travel direction stretch forward while trailing corners lag,
-/// producing the natural physical "elastic smear" effect.
+/// Corners leading in the travel direction stretch faster, while trailing corners lag,
+/// producing the signature Neovide / OpenRGB elastic smear effect.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CornerSprings {
     /// Four corner points: [Top-Left, Top-Right, Bottom-Right, Bottom-Left].
     pub corners: [SpringPoint; 4],
-    /// Base physical spring parameters.
-    pub params: SpringParams,
+    /// Base natural frequency $\omega_0$ (stiffness).
+    pub base_stiffness: f32,
+    /// Base dimensionless damping ratio $\zeta$.
+    pub base_damping: f32,
     /// Target rectangle equilibrium.
     pub target_rect: Rect,
     /// Whether the corners have been initialized to their first target.
     pub initialized: bool,
-    /// Maximum allowed stretch/smear deformation clamp in pixels.
-    pub max_smear: f32,
 }
 
 impl Default for CornerSprings {
     fn default() -> Self {
-        Self::new(Rect::ZERO, SpringParams::snappy())
+        Self::new(Rect::ZERO, 22.0, 0.65)
     }
 }
 
 impl CornerSprings {
     /// Creates a new `CornerSprings` set targeted at `rect`.
-    pub fn new(rect: Rect, params: SpringParams) -> Self {
+    pub fn new(rect: Rect, base_stiffness: f32, base_damping: f32) -> Self {
         let dummy = Pos2::ZERO;
         Self {
             corners: [
-                SpringPoint::new(dummy, params),
-                SpringPoint::new(dummy, params),
-                SpringPoint::new(dummy, params),
-                SpringPoint::new(dummy, params),
+                SpringPoint::new(dummy, base_stiffness, base_damping),
+                SpringPoint::new(dummy, base_stiffness, base_damping),
+                SpringPoint::new(dummy, base_stiffness, base_damping),
+                SpringPoint::new(dummy, base_stiffness, base_damping),
             ],
-            params,
+            base_stiffness,
+            base_damping,
             target_rect: rect,
             initialized: false,
-            max_smear: 40.0,
         }
     }
 
@@ -106,18 +105,6 @@ impl CornerSprings {
         self.target_rect = target;
         if !self.initialized {
             self.reset(target);
-            return;
-        }
-
-        let target_corners = [
-            target.left_top(),
-            target.right_top(),
-            target.right_bottom(),
-            target.left_bottom(),
-        ];
-
-        for i in 0..4 {
-            self.corners[i].set_target(target_corners[i]);
         }
     }
 
@@ -137,40 +124,45 @@ impl CornerSprings {
         self.initialized = true;
     }
 
-    /// Advances the corner physics towards `target_rect` by `dt` seconds.
-    pub fn update(&mut self, dt: f32) {
+    /// Advances the corner physics towards `target_rect` using exact OpenRGB/Neovide elastic smear math.
+    pub fn update(&mut self, target: Rect, dt: f32) {
+        let target_corners = [
+            target.left_top(),
+            target.right_top(),
+            target.right_bottom(),
+            target.left_bottom(),
+        ];
+
         if !self.initialized {
-            self.reset(self.target_rect);
+            for i in 0..4 {
+                self.corners[i].reset(target_corners[i]);
+            }
+            self.initialized = true;
             return;
         }
 
-        let target_corners = [
-            self.target_rect.left_top(),
-            self.target_rect.right_top(),
-            self.target_rect.right_bottom(),
-            self.target_rect.left_bottom(),
-        ];
-
+        // Calculate travel direction based on centers
         let current_center = self.center();
-        let target_center = self.target_rect.center();
+        let target_center = target.center();
         let travel_vec = target_center - current_center;
         let travel_dist = travel_vec.length();
 
-        let travel_dir = if travel_dist > 5.0 {
+        let travel_dir = if travel_dist > 15.0 {
             travel_vec / travel_dist
         } else {
             Vec2::ZERO
         };
 
-        // Corner direction vectors relative to center (clockwise: TL, TR, BR, BL)
+        // Standard local corner direction vectors relative to center
         let corner_dirs = [
-            Vec2::new(-1.0, -1.0).normalized(),
-            Vec2::new(1.0, -1.0).normalized(),
-            Vec2::new(1.0, 1.0).normalized(),
-            Vec2::new(-1.0, 1.0).normalized(),
+            Vec2::new(-1.0, -1.0), // TL
+            Vec2::new(1.0, -1.0),  // TR
+            Vec2::new(1.0, 1.0),   // BR
+            Vec2::new(-1.0, 1.0),  // BL
         ];
 
-        // Sub-linear logarithmic damping scaling over large distances
+        // Logarithmic scaling factor for the damping ratio based on travel distance.
+        // We want the bounce (overshoot) to scale sub-linearly with distance.
         let d0 = 30.0;
         let log_factor = if travel_dist > d0 {
             (1.0 + d0).ln() / (1.0 + travel_dist).ln()
@@ -178,34 +170,34 @@ impl CornerSprings {
             1.0
         };
 
-        let step_base_damping = 1.0 - (1.0 - self.params.damping_ratio) * log_factor;
+        // The effective base damping ratio for this step (approaches 1.0 for large travel distances)
+        let step_base_damping = 1.0 - (1.0 - self.base_damping) * log_factor;
 
         for i in 0..4 {
-            let mut corner_params = self.params;
+            let mut stiffness = self.base_stiffness;
+            let mut damping = step_base_damping;
 
             if travel_dir != Vec2::ZERO {
-                let alignment = travel_dir.dot(corner_dirs[i]);
+                // Dot product of corner relative direction and travel direction.
+                // Positive means this corner is leading the motion.
+                let norm_corner_dir = corner_dirs[i].normalized();
+                let alignment = travel_dir.dot(norm_corner_dir);
 
-                // Leading corners stretch forward smoothly without slowing trailing corners
+                // Smoothly scale stiffness based on alignment (avoiding step discontinuities)
                 let factor = if alignment > 0.0 {
-                    1.0 + alignment * 0.45
+                    1.0 + alignment * 0.6
                 } else {
-                    1.0
+                    1.0 + alignment * 0.3
                 };
-                corner_params.angular_frequency = self.params.angular_frequency * factor;
+                stiffness = self.base_stiffness * factor;
 
-                // Slightly lower damping on leading corners to enhance dynamic elastic stretch
+                // Decrease damping ratio slightly for leading corners to let them stretch and bounce dynamically
                 if alignment > 0.0 {
-                    corner_params.damping_ratio = (step_base_damping * (1.0 - alignment * 0.15 * log_factor)).max(0.1);
-                } else {
-                    corner_params.damping_ratio = step_base_damping;
+                    damping = step_base_damping * (1.0 - alignment * 0.15 * log_factor);
                 }
             }
 
-            self.corners[i].x.params = corner_params;
-            self.corners[i].y.params = corner_params;
-            self.corners[i].set_target(target_corners[i]);
-            self.corners[i].update(dt);
+            self.corners[i].update(target_corners[i], dt, stiffness, damping);
         }
     }
 

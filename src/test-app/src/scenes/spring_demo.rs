@@ -47,9 +47,9 @@ impl Default for SpringDemoState {
             snappy_spring: Spring::new(initial_target, SpringParams::snappy()),
             bouncy_spring: Spring::new(initial_target, SpringParams::bouncy()),
             openrgb_spring: Spring::new(initial_target, SpringParams::openrgb()),
-            custom_spring: Spring::new(initial_target, SpringParams::new(32.0, 0.55)),
-            custom_frequency: 32.0,
-            custom_damping: 0.55,
+            custom_spring: Spring::new(initial_target, SpringParams::new(22.0, 0.65)),
+            custom_frequency: 22.0,
+            custom_damping: 0.65,
             speed_scale: 1.0,
             target_val: initial_target,
             history_gentle: Vec::new(),
@@ -58,10 +58,10 @@ impl Default for SpringDemoState {
             history_openrgb: Vec::new(),
             history_custom: Vec::new(),
             selection_highlight: SpringRect::new(Rect::ZERO)
-                .with_fill(Color32::from_rgba_unmultiplied(0, 255, 136, 40))
-                .with_stroke(Stroke::new(2.0, Color32::from_rgb(0, 255, 136)))
-                .with_rounding(8.0)
-                .with_params(SpringParams::openrgb()),
+                .with_fill(Color32::from_rgba_unmultiplied(0, 255, 136, 14))
+                .with_stroke(Stroke::new(1.5, Color32::from_rgb(0, 255, 136)))
+                .with_rounding(6.0)
+                .with_padding(3.0),
             selected_card: 0,
             highlight_preset: HighlightPreset::OpenRGB,
         }
@@ -91,24 +91,26 @@ impl SpringDemoState {
         self.custom_spring.params = SpringParams::new(self.custom_frequency, self.custom_damping);
 
         // Sync active highlight preset parameters and matching colors
-        let (preset_params, accent_color) = match self.highlight_preset {
-            HighlightPreset::Gentle => (SpringParams::gentle(), Color32::from_rgb(203, 166, 247)),
-            HighlightPreset::Snappy => (SpringParams::snappy(), Color32::from_rgb(166, 227, 161)),
-            HighlightPreset::Bouncy => (SpringParams::bouncy(), Color32::from_rgb(250, 179, 135)),
-            HighlightPreset::OpenRGB => (SpringParams::openrgb(), Color32::from_rgb(0, 255, 136)),
+        let (stiffness, damping, accent_color) = match self.highlight_preset {
+            HighlightPreset::Gentle => (18.0, 0.90, Color32::from_rgb(203, 166, 247)),
+            HighlightPreset::Snappy => (32.0, 0.85, Color32::from_rgb(166, 227, 161)),
+            HighlightPreset::Bouncy => (24.0, 0.50, Color32::from_rgb(250, 179, 135)),
+            HighlightPreset::OpenRGB => (22.0, 0.65, Color32::from_rgb(0, 255, 136)),
             HighlightPreset::Custom => (
-                SpringParams::new(self.custom_frequency, self.custom_damping),
+                self.custom_frequency,
+                self.custom_damping,
                 Color32::from_rgb(137, 220, 235),
             ),
         };
 
-        self.selection_highlight.corners.params = preset_params;
+        self.selection_highlight.corners.base_stiffness = stiffness;
+        self.selection_highlight.corners.base_damping = damping;
         self.selection_highlight.stroke.color = accent_color;
         self.selection_highlight.fill_color = Color32::from_rgba_unmultiplied(
             accent_color.r(),
             accent_color.g(),
             accent_color.b(),
-            40,
+            14,
         );
 
         self.gentle_spring.update(dt);
@@ -189,7 +191,7 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
     let track_height = 32.0;
     render_spring_track(
         ui,
-        "🟣 Gentle (ω0 = 24, ζ = 0.88)",
+        "🟣 Gentle (ω0 = 18, ζ = 0.90)",
         state.gentle_spring.value(),
         state.gentle_spring.velocity(),
         state.target_val,
@@ -201,7 +203,7 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
     ui.add_space(2.0);
     render_spring_track(
         ui,
-        "🟢 Snappy (ω0 = 38, ζ = 0.82)",
+        "🟢 Snappy (ω0 = 32, ζ = 0.85)",
         state.snappy_spring.value(),
         state.snappy_spring.velocity(),
         state.target_val,
@@ -213,7 +215,7 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
     ui.add_space(2.0);
     render_spring_track(
         ui,
-        "🟠 Bouncy (ω0 = 28, ζ = 0.48)",
+        "🟠 Bouncy (ω0 = 24, ζ = 0.50)",
         state.bouncy_spring.value(),
         state.bouncy_spring.velocity(),
         state.target_val,
@@ -225,7 +227,7 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
     ui.add_space(2.0);
     render_spring_track(
         ui,
-        "💚 OpenRGB / Neovide (ω0 = 32, ζ = 0.65)",
+        "💚 OpenRGB / Neovide (ω0 = 22, ζ = 0.65)",
         state.openrgb_spring.value(),
         state.openrgb_spring.velocity(),
         state.target_val,
@@ -355,7 +357,7 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
             state.selection_highlight.set_target(target);
         }
 
-        // Paint the SpringRect highlight with Bézier corners over the selected card
+        // Paint the SpringRect highlight with Bézier corners and padding over the selected card
         state.selection_highlight.paint(ui.painter());
     });
 
