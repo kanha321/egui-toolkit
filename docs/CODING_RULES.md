@@ -26,7 +26,13 @@ supplies, or it doesn't belong in egui-widgetkit at all.
 | `spring-core` | *(nothing but small general-purpose crates)* | `egui`, any other crate in this workspace, any app type |
 | `egui-spring` | `spring-core`, `egui` | any app type |
 | `egui-vim-nav` | `egui` | any other crate in this workspace, any app type |
+| `egui-nav-stack` | `egui`; optionally `egui-spring` (behind `animated-transitions` feature, off by default) | `egui-layout`, `egui-vim-nav`, `egui-themes`, any app type |
 | `egui-themes` | `egui` | any other crate in this workspace, any app type |
+
+`egui-nav-stack` is the one exception to "each crate depends on `egui`
+only" — its optional feature depends on `egui-spring` the same way
+`egui-spring` depends on `spring-core`: opt-in, not a hard requirement
+for the base functionality.
 
 ---
 
@@ -34,7 +40,7 @@ supplies, or it doesn't belong in egui-widgetkit at all.
 
 **No global or static mutable state, anywhere in `src/egui-widgetkit/`.**
 Every type that holds animated/interactive state (`Spring`, `Navigator`,
-`ThemeSwitcher`, focus graphs) is a plain value the *consuming app*
+`NavStack`, `ThemeSwitcher`, focus graphs) is a plain value the *consuming app*
 owns — typically as a field on `test-app`'s own state struct — and
 passes in by `&mut` reference each frame.
 
@@ -64,6 +70,14 @@ reaches for `lazy_static`, `OnceCell` holding mutable data, or similar.
   surfaces. Return `Option`/`Result` for anything that can fail based on
   what the caller passed in (e.g. malformed fractions, an unregistered
   focus-graph node).
+- **A widget that needs to mutate data it's also reading from returns a
+  request, it doesn't mutate directly.** E.g. `NavDisplay::show()` reads
+  `&NavStack` to render the current screen; if the app's own closure
+  decides to navigate, `.show()` returns that as a value (a push/pop
+  request) for the app to apply to its own `&mut NavStack` afterward —
+  it doesn't hand the closure a live `&mut` into the same stack being
+  read. Avoids fighting the borrow checker and keeps state mutation in
+  exactly one place: the caller.
 
 ---
 
@@ -83,10 +97,6 @@ reaches for `lazy_static`, `OnceCell` holding mutable data, or similar.
   egui-widgetkit (PRD §7, non-goal). If a future widget genuinely can't
   be expressed as `egui::Shape`s, that's a new proposal, reviewed on its
   own — not something to reach for by default.
-- **Corner Rounding Invariant**: The 4 rounded corners of widgets, cards,
-  and highlights must always remain intact and fully rendered. Borders and
-  background fills must conform to the allocated geometry so corner roundings
-  are never sliced off by parent clipping boundaries.
 
 ---
 

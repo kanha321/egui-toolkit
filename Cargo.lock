@@ -981,6 +981,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui-nav-stack"
+version = "0.1.0"
+dependencies = [
+ "egui",
+ "egui-spring",
+]
+
+[[package]]
 name = "egui-spring"
 version = "0.1.0"
 dependencies = [
@@ -2902,6 +2910,7 @@ dependencies = [
  "eframe",
  "egui",
  "egui-layout",
+ "egui-nav-stack",
  "egui-spring",
  "egui-themes",
  "egui-vim-nav",

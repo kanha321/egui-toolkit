@@ -1,6 +1,6 @@
 # Progress Tracker — egui-widgetkit
 
-This document tracks implementation progress across all parts and subparts defined in [`docs/BUILD_PLAN.md`](file:///d:/randoms/egui-lib/docs/BUILD_PLAN.md).
+This document tracks implementation progress across all parts and subparts defined in [`docs/BUILD_PLAN.md`](file:///d:/randoms/egui-lib/docs/BUILD_PLAN.md) (v6).
 
 ---
 
@@ -8,13 +8,14 @@ This document tracks implementation progress across all parts and subparts defin
 
 | Part | Description | Status | Tests / Verification |
 |---|---|---|---|
-| **Part 0** | Workspace Scaffolding | ✅ Completed | Root workspace configured; `cargo check --workspace` passes cleanly |
-| **Part 1** | `egui-layout` | ✅ Completed | Constraint solver + `compute_min_length` implemented; 8 unit tests + 2 doctests passed |
-| **Part 2** | `spring-core` (Pure Math) | ⬜ Pending | Closed-form ODE unit tests |
-| **Part 3** | `egui-spring` (SpringRect) | ⬜ Pending | `selection_highlight` example |
-| **Part 4** | `egui-vim-nav` (Keyboard Graph) | ⬜ Pending | `grid_navigation` example |
-| **Part 5** | `egui-themes` (Theming & Preview) | ⬜ Pending | `theme_switcher` example |
-| **Part 6** | `test-app` (Integration & Scenes) | ⬜ Pending | Isolated scenes + `combined_demo` |
+| **Part 0** | Workspace Scaffolding (All 6 Library Crates + App) | ✅ Completed | Root workspace configured; `cargo check --workspace` passes cleanly |
+| **Part 1** | `egui-layout` (Constraint Solver & Spacing Engine) | ✅ Completed | Constraint solver + `compute_min_length` implemented; 8 unit tests + 2 doctests passed |
+| **Part 2** | `spring-core` (Pure Math ODE Solver) | ✅ Completed | Analytical closed-form solver; 8 unit tests + 1 doctest passed; zero egui dep verified |
+| **Part 3** | `egui-spring` (SpringRect & Bézier Smear) | ⬜ Pending | `selection_highlight` example |
+| **Part 4** | `egui-vim-nav` (Intra-Screen Focus Graph) | ⬜ Pending | `grid_navigation` example |
+| **Part 5** | `egui-themes` (Token-Based Theming & Live Preview) | ⬜ Pending | `theme_switcher` example |
+| **Part 6** | `egui-nav-stack` (Navigation 3 Screen Back-Stack) | ⬜ Pending | `stack_push_pop_replace` tests + `stack_navigation` example |
+| **Part 7** | `test-app` (Multi-Crate Integration & Showcase App) | ⬜ Pending | Isolated scenes + `combined_demo` |
 
 ---
 
@@ -22,9 +23,9 @@ This document tracks implementation progress across all parts and subparts defin
 
 ### Part 0 — Workspace Scaffolding
 - [x] Root `Cargo.toml` with `[workspace.dependencies]` (`egui = "0.27"`, `edition = "2021"`)
-- [x] Directory skeleton matching `docs/FOLDER_STRUCTURE.md` (`src/egui-widgetkit/` + `src/test-app/`)
+- [x] Directory skeletons for all 6 library crates (`src/egui-widgetkit/`) + `src/test-app/` matching `docs/FOLDER_STRUCTURE.md`
 - [x] `.gitignore` & root `README.md`
-- [x] Initialized Git repository
+- [x] Initialized Git repository (branch `feat/nav-stack/b1`)
 - [x] Verified: `cargo check --workspace` passes with 0 warnings
 - [x] Verified: `cargo tree -p spring-core` confirms zero `egui` dependency
 
@@ -52,16 +53,16 @@ This document tracks implementation progress across all parts and subparts defin
 ---
 
 ### Part 2 — `spring-core` (Pure Math — Zero `egui` Dependency)
-- [ ] `src/egui-widgetkit/spring-core/Cargo.toml` (zero `egui` dependency)
-- [ ] `src/egui-widgetkit/spring-core/README.md`
-- [ ] `src/egui-widgetkit/spring-core/src/lib.rs`
-- [ ] **2.1** `params.rs` — `SpringParams` value type + presets (`gentle`, `snappy`, `bouncy`)
-- [ ] **2.2** `solver.rs` — Closed-form step functions (underdamped, critically damped with $\epsilon$-band, overdamped)
-- [ ] **2.3** `spring.rs` — `Spring` state struct with `.update(dt)` and `.is_settled()` checking position & velocity
-- [ ] **2.4** Tests:
-  - [ ] `tests/solver_matches_closed_form.rs`
-  - [ ] `tests/settles_within_tolerance.rs`
-- [ ] Verify: `cargo tree -p spring-core` confirms zero `egui` dependency
+- [x] `src/egui-widgetkit/spring-core/Cargo.toml` (zero `egui` dependency)
+- [x] `src/egui-widgetkit/spring-core/README.md`
+- [x] `src/egui-widgetkit/spring-core/src/lib.rs`
+- [x] **2.1** `params.rs` — `SpringParams` value type + presets (`gentle`, `snappy`, `bouncy`)
+- [x] **2.2** `solver.rs` — Closed-form step functions (underdamped, critically damped with $\epsilon$-band, overdamped)
+- [x] **2.3** `spring.rs` — `Spring` state struct with `.update(dt)` and `.is_settled()` checking position & velocity
+- [x] **2.4** Tests:
+  - [x] `tests/solver_matches_closed_form.rs` (5 tests passed: underdamped, critically damped, overdamped, framerate invariance, epsilon band continuity)
+  - [x] `tests/settles_within_tolerance.rs` (3 tests passed: settle & snap clean, moving-through-target protection, all presets settle)
+- [x] Verify: `cargo tree -p spring-core` confirms zero `egui` dependency
 
 ---
 
@@ -77,7 +78,7 @@ This document tracks implementation progress across all parts and subparts defin
 
 ---
 
-### Part 4 — `egui-vim-nav`
+### Part 4 — `egui-vim-nav` (Focus Navigation Within One Screen)
 - [ ] `src/egui-widgetkit/egui-vim-nav/Cargo.toml`
 - [ ] `src/egui-widgetkit/egui-vim-nav/README.md`
 - [ ] `src/egui-widgetkit/egui-vim-nav/src/lib.rs`
@@ -103,19 +104,35 @@ This document tracks implementation progress across all parts and subparts defin
 
 ---
 
-### Part 6 — `test-app` (Integration & Showcase App)
-- [ ] `src/test-app/Cargo.toml` (path-depends on `egui-widgetkit/*` crates)
-- [ ] **6.1** `src/test-app/src/main.rs` (minimal bootstrap script with dynamic min_inner_size)
-- [ ] **6.2** `src/test-app/src/app.rs` & `app/` (`state.rs`, `update.rs`)
-- [ ] **6.3** Isolated demo scenes in `scenes/`:
-  - [ ] `scenes/layout_demo.rs` (exercises `egui-layout`)
+### Part 6 — `egui-nav-stack` (Navigation 3 Screen Back-Stack)
+- [ ] `src/egui-widgetkit/egui-nav-stack/Cargo.toml` (`optional = true` for `egui-spring`)
+- [ ] `src/egui-widgetkit/egui-nav-stack/README.md`
+- [ ] `src/egui-widgetkit/egui-nav-stack/src/lib.rs`
+- [ ] **6.1** `stack.rs` — `NavStack<K>` (`push`, `pop`, `replace_top`, `pop_to(predicate)`, `top`)
+- [ ] **6.2** Entry resolution (inline closure in `display.rs`)
+- [ ] **6.3** `display.rs` — `NavDisplay<K>` widget returning `Option<NavAction<K>>` requests
+- [ ] **6.4** `transition.rs` — `#[cfg(feature = "animated-transitions")]` spring push/pop transition
+- [ ] **6.5** Tests & Example:
+  - [ ] `tests/stack_push_pop_replace.rs` (plain data assertions)
+  - [ ] `examples/stack_navigation.rs`
+
+---
+
+### Part 7 — `test-app` (Multi-Crate Integration & Showcase App)
+- [ ] `src/test-app/Cargo.toml` (path-depends on all 6 `egui-widgetkit/*` crates)
+- [ ] **7.1** `src/test-app/src/main.rs` (minimal bootstrap script with dynamic min_inner_size)
+- [ ] **7.2** `src/test-app/src/app.rs` & `app/` (`state.rs`, `update.rs`)
+- [ ] **7.3** Isolated demo scenes in `scenes/`:
+  - [x] `scenes/layout_demo.rs` (exercises `egui-layout` with dynamic min size & rounded corners)
   - [ ] `scenes/spring_demo.rs` (exercises `spring-core` + `egui-spring`)
   - [ ] `scenes/vim_nav_demo.rs` (exercises `egui-vim-nav`)
+  - [ ] `scenes/nav_stack_demo.rs` (exercises `egui-nav-stack`)
   - [ ] `scenes/theme_demo.rs` (exercises `egui-themes`)
-- [ ] **6.4** `scenes/combined_demo.rs` (Full integrated multi-crate showcase: layout + spring highlight + themes + vim nav)
+- [ ] **7.4** `scenes/combined_demo.rs` (Full integrated multi-crate showcase: layout + spring highlight + nav-stack + themes + vim nav)
 
 ---
 
 ## Log of Completed Milestones
-- **Part 0 Completed**: Root virtual workspace `Cargo.toml` configured with `[workspace.dependencies]` pinning `egui = "0.27"`, git initialized with `.gitignore`, full directory skeletons built under `src/egui-widgetkit/` and `src/test-app/`, verified with `cargo check --workspace` (0 warnings).
-- **Part 1 Completed & Hardened**: Upgraded `egui-layout` to a constraint-aware layout solver supporting `Size::Fraction`, `Size::Exact`, `Size::Remainder`, `.section_min()`, and `.section_fixed()`. Added `compute_min_length()` API and configured `test-app` window min inner size. 10/10 tests passing.
+- **Part 0 Completed**: Root virtual workspace `Cargo.toml` configured with `[workspace.dependencies]` pinning `egui = "0.27"`, git initialized with `.gitignore`, full directory skeletons built under `src/egui-widgetkit/` (all 6 crates) and `src/test-app/`, verified with `cargo check --workspace` (0 warnings).
+- **Part 1 Completed & Hardened**: Upgraded `egui-layout` to a constraint-aware layout solver supporting `Size::Fraction`, `Size::Exact`, `Size::Remainder`, `.section_min()`, and `.section_fixed()`. Added `compute_min_length()` API and configured `test-app` dynamic window min inner size with corner rounding protection. 10/10 tests passing.
+- **Part 2 Completed & Verified**: Built `spring-core` pure math analytical closed-form ODE solver covering underdamped, critically damped ($\epsilon$-band snapped), and overdamped regimes with `SpringParams` presets and framerate-independent step invariance. 8 unit tests + 1 doctest passed; confirmed zero `egui` dependency via `cargo tree -p spring-core`.

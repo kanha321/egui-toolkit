@@ -4,6 +4,7 @@ pub enum ActiveScene {
     Layout,
     Spring,
     VimNav,
+    NavStack,
     Theme,
     Combined,
 }

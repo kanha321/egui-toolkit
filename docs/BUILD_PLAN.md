@@ -6,6 +6,11 @@ what order* — egui-widgetkit broken into parts and subparts small enough
 to build and verify one at a time, each with what to keep in mind while
 building it and the specific errors that tend to show up there.
 
+**Update:** adds Part 6, `egui-nav-stack` — a back-stack screen
+navigation crate modeled on Android Navigation 3 (ARCHITECTURE_PRD.md
+§5.6). `test-app` shifts from Part 6 to Part 7 to make room; nothing
+else about Parts 0–5 changes.
+
 Nothing here changes any decision already made in the other three docs.
 Where a subpart's guidance is really just "apply CODING_RULES §X," this
 doc says so instead of repeating the rule.
@@ -14,7 +19,7 @@ doc says so instead of repeating the rule.
 
 ## How to use this doc
 
-Each Part is one crate (or, for Part 6, `test-app`). Each Subpart is one
+Each Part is one crate (or, for Part 7, `test-app`). Each Subpart is one
 file or one tight cluster of files, small enough to build, test, and
 move on. Work through a Part's subparts in order — they're ordered by
 dependency within the crate. Parts themselves don't all have to happen
@@ -40,7 +45,7 @@ skeletons from `FOLDER_STRUCTURE.md` §4, git init, `.gitignore`.
   `egui = "0.27"` once, with every crate inheriting it via
   `egui = { workspace = true }`. That's the mechanical way to actually
   guarantee CODING_RULES §6 ("all `egui`-consuming crates pin the same
-  version") instead of relying on remembering to update five files by
+  version") instead of relying on remembering to update six files by
   hand every time the pin changes.
 - Decide the Rust edition (2021, per `FOLDER_STRUCTURE.md` §5) once and
   use it in every crate's `Cargo.toml` from the start.
@@ -85,9 +90,6 @@ might come to depend on its shape.
   edge on some fraction combinations — worth an explicit test with an
   odd fraction set (e.g. `0.33 / 0.33 / 0.34`) rather than only round
   numbers.
-- **Corner rounding preservation:** ensure the allocated section rectangle
-  and any outer card shapes preserve all 4 rounded corners without being
-  sliced by parent clipping boundaries when windows shrink.
 
 ---
 
@@ -252,7 +254,11 @@ rendering bug, and it's much faster to catch here than to debug inside
 
 ## Part 4 — `egui-vim-nav`
 
-Independent of Parts 2–3; can be built in parallel with them.
+Independent of Parts 2–3; can be built in parallel with them. Not to be
+confused with Part 6 (`egui-nav-stack`) — this crate moves *focus*
+within one screen; Part 6 moves *between* screens. See
+ARCHITECTURE_PRD.md §5's callout for the distinction if it's ever
+unclear which one a feature belongs in.
 
 ### 4.1 `focus_graph.rs` — the navigable-element graph
 
@@ -315,7 +321,8 @@ before `test-app`'s scenes start depending on the shape of this API.
 
 ## Part 5 — `egui-themes`
 
-Independent of Parts 2–4; can be built in parallel with them.
+Independent of Parts 2–4 and Part 6; can be built in parallel with any
+of them.
 
 ### 5.1 `token.rs` — `ThemeToken`
 
@@ -367,40 +374,170 @@ will actually do elsewhere in the app.
 
 ---
 
-## Part 6 — `test-app`
+## Part 6 — `egui-nav-stack`
 
-Build each subpart's matching scene (6.3) right after its crate lands
-in Parts 1–5 — don't batch all the scenes at the end. Catching an API
+Independent of Parts 2–5 for its core (6.1–6.3): the base crate depends
+on `egui` only. Only the optional 6.4 (animated transitions) depends on
+Part 3 (`egui-spring`). Not to be confused with Part 4
+(`egui-vim-nav`) — see the callout at the top of Part 4.
+
+Ported concept, not ported API: this crate takes Android Navigation 3's
+core idea — **the back stack is a plain list the app owns**, not state
+hidden inside a controller — and expresses it the way egui naturally
+wants it expressed (a builder-shaped widget reading a stack each frame),
+not as a transplant of Navigation 3's Compose-specific DSL. Resist the
+urge to over-port the literal API shape; immediate mode and Compose's
+retained composition are different enough that a literal port would
+fight the framework instead of fitting it.
+
+### 6.1 `stack.rs` — `NavStack<K>`
+
+**What to build:** a thin wrapper around `Vec<K>`, generic over an
+app-supplied key type `K` (typically an enum of screens + params):
+`push`, `pop`, `pop_to(predicate)`, `replace_top`, `top() -> Option<&K>`.
+
+**Keep in mind:**
+- Zero knowledge of what `K` is — same app-agnostic stance as every
+  other crate (CODING_RULES §1). No routing, no URL parsing, no
+  serialization bound required on `K` beyond what this crate's own
+  methods need (likely just nothing, or `Clone` if a previous top needs
+  to be retained for a transition — see 6.4).
+- Don't dedupe or special-case repeated consecutive pushes — leave that
+  decision (whether pushing the same screen twice is meaningful) to the
+  app, same as Navigation 3 does.
+
+**Errors to avoid:**
+- `pop()` on an empty stack must return `None` cleanly, never panic —
+  same "no unwrap on caller-driven input" rule as CODING_RULES §3,
+  applied here to the app's own navigation calls rather than external
+  input.
+- Don't bake in a "minimum one screen" invariant inside this crate. If
+  an app wants to prevent popping its root screen, that's app-level
+  logic checking `stack.len()` before calling `pop()` — this crate
+  shouldn't guess at that policy.
+
+### 6.2 Entry resolution (inline in `display.rs`, not a separate stored type)
+
+**Keep in mind:** because egui is immediate mode, there's no need for a
+persistent `NavEntry` object cached per key the way Navigation 3 keeps
+one — the "entry provider" here is just a closure the app passes to
+`.show()` each frame, matching how every other widget in this library
+already works. Don't build a macro-based route-registration DSL to
+mimic Navigation 3's declarative shape; a plain closure is the idiomatic
+fit for immediate mode.
+
+**Errors to avoid:** trying to cache rendered content across frames
+"for performance" — egui already redraws the whole tree every frame by
+design, and adding a content cache here just reintroduces state this
+crate isn't supposed to own (CODING_RULES §2).
+
+### 6.3 `display.rs` — `NavDisplay<K>`
+
+**What to build:** `NavDisplay::new(&nav_stack).show(ui, |key, ui| {
+/* app matches on key, draws that screen */ })`, builder-shaped per
+CODING_RULES §3. Renders only the top-of-stack entry by default.
+
+**Keep in mind:**
+- Default to single-pane, top-of-stack-only rendering. Navigation 3's
+  multi-pane "Scenes" (e.g. list-detail side by side) is a real, useful
+  extension but an advanced/opt-in one there too — treat it as a later
+  addition (PRD §5.6), not part of the first pass.
+- `.show()` reads `&NavStack<K>` — it does not take `&mut NavStack<K>`.
+
+**Errors to avoid:**
+- **The borrow-checker trap this crate is most likely to hit:** the
+  app's closure will naturally want to call something like
+  `nav_stack.push(...)` in response to a button click, while that same
+  stack is currently being read to decide what to render. Don't hand
+  the closure a live `&mut` into the stack it's mid-read on. Instead,
+  have `.show()` return any navigation request the closure produced
+  (e.g. `Option<NavAction<K>>`) and let the app apply it to its own
+  `&mut NavStack` *after* `.show()` returns — this is the general rule
+  now in CODING_RULES §3 ("a widget that needs to mutate data it's also
+  reading from returns a request, it doesn't mutate directly").
+- Rendering every entry in the stack by default instead of just the
+  top — a naive full-stack render produces overlapping/stacked screens
+  rather than the expected single-current-screen behavior.
+
+### 6.4 `transition.rs` — optional animated push/pop (feature-gated)
+
+**What to build:** behind a Cargo feature (e.g.
+`animated-transitions`), a spring-driven transition between the
+previous top-of-stack and the new one when the stack changes, using
+`egui-spring`/`spring-core`.
+
+**Keep in mind:** this file only compiles when the feature is enabled
+(`#[cfg(feature = "animated-transitions")]`) — the base crate (6.1–6.3)
+must build and work with zero dependency beyond `egui` when the feature
+is off.
+
+**Errors to avoid:**
+- Making this a hard, always-on dependency. That would force every
+  consumer of `egui-nav-stack` — even an app that just wants plain
+  instant screen switches — to pull in `egui-spring` and `spring-core`,
+  which directly contradicts the "depend on only what you need"
+  principle every other crate here follows (PRD §2, §11).
+- Reusing a single shared spring across every transition rather than a
+  fresh one per push/pop — same class of bug as Part 3.1's
+  "forgot to re-target the springs": a stale, already-settled spring
+  from a previous transition won't request repaint for a new one.
+
+### 6.5 Tests + example
+
+**What to build:** per PRD §5.6/§9 — `NavStack<K>`'s push/pop/replace
+logic is plain data manipulation, so give it ordinary `#[test]`s (same
+approach as a `-core` crate), *and* an `examples/stack_navigation.rs`
+demo exercising `NavDisplay`.
+
+**Errors to avoid:** testing only the "happy path" push-push-pop
+sequence. Also cover: popping past empty, `replace_top` on an empty
+stack, and `pop_to` with a predicate that matches nothing (should behave
+like a no-op, not panic).
+
+---
+
+## Part 7 — `test-app`
+
+Build each subpart's matching scene (7.3) right after its crate lands
+in Parts 1–6 — don't batch all the scenes at the end. Catching an API
 awkwardness the moment a crate is "done" is the entire reason
 `test-app` exists (`FOLDER_STRUCTURE.md` §7).
 
-### 6.1 `main.rs`
+### 7.1 `main.rs`
 
 Per `FOLDER_STRUCTURE.md` §6 — kept to a bootstrap script, no logic.
 
-### 6.2 `app/state.rs` + `app/update.rs`
+### 7.2 `app/state.rs` + `app/update.rs`
 
 **Keep in mind:** `ActiveScene` and any shared/per-scene state live
 here — this is the one place in `test-app` allowed to hold that state,
 per the state-ownership rule (CODING_RULES §2) applied to the app side.
+This now includes owning the `NavStack<K>` for the nav-stack scene(s),
+same as it owns every other crate's per-scene state.
 
 **Errors to avoid:** letting per-scene state leak into the `scenes/*`
 files as module-level statics "just for convenience" — that's the same
 anti-pattern CODING_RULES §9 flags inside the library, and it's just as
 much of a problem in the app.
 
-### 6.3 Individual demo scenes — one per crate
+### 7.3 Individual demo scenes — one per crate
 
-**Keep in mind:** each scene should exercise *only* its one crate.
+**Keep in mind:** each scene should exercise *only* its one crate,
+including the new `nav_stack_demo.rs` — a small stack of 2–3 placeholder
+screens with push/pop buttons is enough to prove `NavStack`/`NavDisplay`
+work, without pulling in layout, spring, or theming.
 
 **Errors to avoid:** "just adding a bit of theming" to `layout_demo.rs`
-to make it look nicer, or similar cross-contamination between scenes.
+to make it look nicer, or similar cross-contamination between scenes —
+same trap applies to `nav_stack_demo.rs`: resist wiring in
+`animated-transitions` here just because it looks nicer; that belongs in
+`combined_demo.rs` (7.4) where composing crates together is the point.
 Once a single-crate scene quietly depends on a second crate, it stops
 being useful as an isolated sanity check — you lose the fast,
 one-crate-at-a-time debugging story that's the entire point of having
 per-scene isolation (`FOLDER_STRUCTURE.md` §7).
 
-### 6.4 `combined_demo.rs`
+### 7.4 `combined_demo.rs`
 
 **What to build:** several crates active together — the one scene that
 actually proves composition (PRD §9, §11).
@@ -409,8 +546,10 @@ actually proves composition (PRD §9, §11).
 ownership conflicts between crates that never show up in isolation.
 Specifically worth checking here: does vim-nav focus interact correctly
 with a spring-driven selection highlight moving to the newly-focused
-region, and does an active theme correctly restyle a layout that's also
-under vim-nav control.
+region; does an active theme correctly restyle a layout that's also
+under vim-nav control; and, once `egui-nav-stack` is folded in, does
+pushing a new screen correctly reset or hand off vim-nav focus rather
+than leaving focus pointed at a region that's no longer visible.
 
 **Errors to avoid:** deferring this scene "for later." Per PRD §9/§11 it
 *is* the integration proof — there's no other place in this repo where
@@ -431,11 +570,14 @@ Dependency-driven, not strictly linear:
    in practice it's much faster to find solver bugs in plain `#[test]`
    output than inside a rendered widget.
 4. **Part 3** (`egui-spring`) — depends on Part 2.
-5. **Part 4** (`egui-vim-nav`) and **Part 5** (`egui-themes`) — both
-   independent of 2/3 and of each other; do them in either order, or in
-   parallel if more than one person is working on this.
-6. **Part 6.3** — add the matching `test-app` scene immediately after
-   each of Parts 1/3/4/5 lands, not batched at the end.
-7. **Part 6.4** (`combined_demo`) — last, once layout + spring + themes
-   exist at minimum; vim-nav can be folded into it slightly later
-   without blocking the rest.
+5. **Part 4** (`egui-vim-nav`), **Part 5** (`egui-themes`), and **Part
+   6.1–6.3** (`egui-nav-stack`'s core) — all independent of 2/3 and of
+   each other; do them in any order, or in parallel if more than one
+   person is working on this.
+6. **Part 6.4** (`egui-nav-stack`'s optional animated transitions) —
+   after Part 3, since it depends on `egui-spring`.
+7. **Part 7.3** — add the matching `test-app` scene immediately after
+   each of Parts 1/3/4/5/6 lands, not batched at the end.
+8. **Part 7.4** (`combined_demo`) — last, once layout + spring + themes
+   exist at minimum; vim-nav and nav-stack can be folded in slightly
+   later without blocking the rest.

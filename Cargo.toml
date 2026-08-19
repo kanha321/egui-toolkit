@@ -5,6 +5,7 @@ members = [
     "src/egui-widgetkit/spring-core",
     "src/egui-widgetkit/egui-spring",
     "src/egui-widgetkit/egui-vim-nav",
+    "src/egui-widgetkit/egui-nav-stack",
     "src/egui-widgetkit/egui-themes",
     "src/test-app",
 ]

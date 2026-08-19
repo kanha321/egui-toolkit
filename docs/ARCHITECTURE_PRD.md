@@ -1,15 +1,16 @@
 # egui-widgetkit — Architecture PRD
 
-**Status:** Draft v5 (supersedes v4 — v4 fixed the repo structure but still
-called the library just "the library," living at the generic
-`src/library/`. This draft gives it an actual name, **egui-widgetkit**,
-and renames the folder to match: `src/egui-widgetkit/`. Nothing about the
-crates inside it, or the single-repo model from v4, changes — this is a
-naming pass only.)
+**Status:** Draft v6 (supersedes v5 — adds a sixth crate,
+`egui-nav-stack`, a back-stack-based screen/destination navigation
+system modeled on the philosophy of Android's Navigation 3: the stack is
+a plain list the consuming app owns, not state hidden inside a
+controller. This is additive — nothing about the five existing crates or
+the single-repo model changes.)
 
 **Scope:** "egui-widgetkit" is the name of the library itself — the
 collection of crates at `src/egui-widgetkit/` (layout, spring physics,
-vim-style navigation, theming). It is not the name of the whole repo:
+vim-style focus navigation, back-stack screen navigation, theming). It
+is not the name of the whole repo:
 the repo also contains, at `src/test-app/`, the actual app being built
 today, and the repo can be named whatever that app is called. The
 library stays fully app-agnostic in code (§1, §3) regardless of what the
@@ -38,7 +39,7 @@ docs, not this library's.
 
 ## 2. Goals
 
-- Ship five focused, independently-usable crates (see §5) under
+- Ship six focused, independently-usable crates (see §5) under
   `src/egui-widgetkit/` that `src/test-app/` — or any future egui app —
   can path-depend on individually. An app that only wants layout
   shouldn't have to pull in the spring or theming crates.
@@ -83,6 +84,7 @@ members = [
   "src/egui-widgetkit/spring-core",
   "src/egui-widgetkit/egui-spring",
   "src/egui-widgetkit/egui-vim-nav",
+  "src/egui-widgetkit/egui-nav-stack",
   "src/egui-widgetkit/egui-themes",
   "src/test-app",
 ]
@@ -94,12 +96,13 @@ in-repo path dependency:
 ```toml
 # src/test-app/Cargo.toml
 [dependencies]
-egui-layout  = { path = "../egui-widgetkit/egui-layout" }
-spring-core  = { path = "../egui-widgetkit/spring-core" }
-egui-spring  = { path = "../egui-widgetkit/egui-spring" }
-egui-vim-nav = { path = "../egui-widgetkit/egui-vim-nav" }
-egui-themes  = { path = "../egui-widgetkit/egui-themes" }
-eframe       = "0.27"
+egui-layout   = { path = "../egui-widgetkit/egui-layout" }
+spring-core   = { path = "../egui-widgetkit/spring-core" }
+egui-spring   = { path = "../egui-widgetkit/egui-spring" }
+egui-vim-nav  = { path = "../egui-widgetkit/egui-vim-nav" }
+egui-nav-stack = { path = "../egui-widgetkit/egui-nav-stack" }
+egui-themes   = { path = "../egui-widgetkit/egui-themes" }
+eframe        = "0.27"
 ```
 
 Each crate under `src/egui-widgetkit/` still keeps its own `Cargo.toml`
@@ -126,12 +129,21 @@ exists, single-repo is the answer.
 | `egui-layout` | ✅ Implemented | `egui` only | Declarative, responsive nested split layouts (`Split::horizontal()/vertical()`) |
 | `spring-core` | Stub | *(nothing — no `egui` dep)* | Framework-agnostic analytical spring physics solver (pure math) |
 | `egui-spring` | Stub | `spring-core`, `egui` | `SpringRect` and other spring-driven widgets (elastic selection highlights) |
-| `egui-vim-nav` | Stub | `egui` only | Vim-style (HJKL) keyboard navigation across nested UI elements |
+| `egui-vim-nav` | Stub | `egui` only | Vim-style (HJKL) keyboard navigation across nested UI elements *within one screen* |
+| `egui-nav-stack` | Stub | `egui` only (optionally `egui-spring` — see §5.6) | App-owned back stack of screens/destinations + a display widget that renders the top of it, modeled on Android Navigation 3 |
 | `egui-themes` | Stub | `egui` only | Theme tokens, switching, live preview panel |
 
 Dependency direction within egui-widgetkit: `egui-spring` depends on
-`spring-core`; nothing else cross-depends. Each crate can be pulled in
-alone.
+`spring-core`; `egui-nav-stack` *optionally* depends on `egui-spring`
+(feature-gated, §5.6) for animated push/pop transitions; nothing else
+cross-depends. Each crate can still be pulled in alone — the optional
+dependency is off by default.
+
+**`egui-vim-nav` vs. `egui-nav-stack` — different things, similar name:**
+`egui-vim-nav` moves *focus* between regions already visible on one
+screen (sidebar → controls → grid). `egui-nav-stack` moves *between
+whole screens* (list → detail → settings), tracked as a stack the app
+pushes and pops. An app can use either alone, both together, or neither.
 
 ### 5.1 `egui-layout` — implemented today
 
@@ -197,6 +209,44 @@ Token-based theme definitions (named color/spacing/radius slots), a
 switcher, and a live-preview panel widget. Ships with a set of curated
 built-in palettes but lets a consuming app define its own tokens too.
 
+### 5.6 `egui-nav-stack` — planned
+
+A back-stack-based screen navigation system, modeled on the philosophy
+of Android's Navigation 3 library — **the back stack is a plain list the
+consuming app owns**, not hidden state inside a controller object. This
+crate ports that philosophy, not Navigation 3's literal Compose-shaped
+API surface — egui is immediate-mode, so the natural shape here is
+closer to `Split`'s builder pattern than to a declarative routing DSL.
+
+Two public pieces:
+
+- **`NavStack<K>`** — a thin wrapper around `Vec<K>`, generic over an
+  app-defined key type `K` (typically an enum of screens + their
+  params). `push(&mut self, key: K)`, `pop(&mut self) -> Option<K>`,
+  `pop_to(&mut self, predicate)`, `replace_top(&mut self, key: K)`,
+  `top(&self) -> Option<&K>`. This crate has zero knowledge of what `K`
+  actually is — same app-agnostic stance as every other crate here.
+- **`NavDisplay<K>`** — `NavDisplay::new(&nav_stack).show(ui, |key, ui|
+  { /* app matches on key and draws that screen */ })`. Renders only
+  the top-of-stack entry by default; returns any navigation request the
+  app's closure produced (a push/pop) so the app applies it to its own
+  `&mut NavStack` after `.show()` returns, rather than the closure
+  mutating the stack it's currently being read from.
+
+**Optional, feature-gated:** an `animated-transitions` feature adds
+spring-driven push/pop transitions by depending on `egui-spring` (and
+transitively `spring-core`). Off by default, so an app that just wants
+the plain stack + display isn't forced to pull in the spring crates.
+
+**Explicitly out of scope for this crate** (consistent with PRD §3's
+non-goals): no routing/URL parsing, no deep-linking, no
+serialization/persistence of the stack — if `K` is serializable, saving
+and restoring `Vec<K>` across app launches is the consuming app's job,
+same as Navigation 3 leaves state-saving to `rememberSaveable` on the
+app side. Multi-pane display (Navigation 3's "Scenes," e.g. list-detail
+side-by-side) is a plausible future addition but not in the first pass —
+default to single-pane, top-of-stack-only rendering.
+
 ---
 
 ## 6. Design principles
@@ -204,7 +254,7 @@ built-in palettes but lets a consuming app define its own tokens too.
 - **Small, focused crates over one monolith.** Each crate does one thing;
   an app depends only on what it needs.
 - **No global or static mutable state, anywhere.** Every widget's state
-  (a `Spring`, a `Navigator`, a `ThemeSwitcher`) is an explicit value the
+  (a `Spring`, a `Navigator`, a `NavStack`, a `ThemeSwitcher`) is an explicit value the
   consuming app owns and passes in — today that's `src/test-app/`, but
   the rule doesn't special-case it just because it's co-located. This is
   what lets multiple instances coexist and keeps egui-widgetkit trivially
@@ -260,9 +310,12 @@ code in this library.** Smoothness comes from two things only:
   exact numeric output (closed-form solution vs. expected curve, settling
   tolerance) — no `egui`, no mocking.
 - **Widget crates (`egui-layout`, `egui-spring`, `egui-vim-nav`,
-  `egui-themes`):** egui rendering isn't practically unit-testable, so
+  `egui-nav-stack`, `egui-themes`):** egui rendering isn't practically unit-testable, so
   each widget crate ships an `examples/` directory with a small `eframe`
   demo app. This is both the manual QA surface and living documentation.
+  (`NavStack<K>`'s push/pop/replace logic is plain data manipulation
+  though, so give it ordinary `#[test]`s too, same as a `-core` crate,
+  in addition to `egui-nav-stack`'s `examples/` demo for `NavDisplay`.)
 - Since `src/test-app/` is, today, the *only* real consumer, its
   `combined_demo` scene (FOLDER_STRUCTURE.md §4/§7) already does the job
   of "prove the crates compose correctly together" — there's no separate
@@ -282,12 +335,15 @@ code in this library.** Smoothness comes from two things only:
 
 ## 11. Success criteria
 
-- `cargo check --workspace` passes with all 5 egui-widgetkit crates plus
+- `cargo check --workspace` passes with all 6 egui-widgetkit crates plus
   `src/test-app` present.
 - `cargo tree -p spring-core` shows no `egui` dependency.
 - `src/test-app` (or any future consuming app) can add a single crate
   (e.g. just `egui-layout`) as a path dependency without pulling in the
-  other four.
+  other five.
+- `egui-nav-stack` with the default feature set (no `animated-transitions`)
+  pulls in `egui` only — `cargo tree -p egui-nav-stack` shows no
+  `egui-spring`/`spring-core` unless that feature is explicitly enabled.
 - Spring-driven widgets hold a consistent frame rate using only
   `request_repaint()` — no custom render path anywhere in egui-widgetkit.
 - Each widget crate has at least one runnable `examples/` demo.
@@ -296,12 +352,19 @@ code in this library.** Smoothness comes from two things only:
 
 ## 12. Roadmap
 
+See `BUILD_PLAN.md` for this roadmap broken into concrete parts and
+subparts, with what to keep in mind and what errors to avoid for each
+one. The steps below are the summary; that doc is the detail.
+
 1. `spring-core`: closed-form solver + `SpringParams` presets + unit tests.
 2. `egui-spring`: `SpringRect`, corner-spring bundle, Bézier border
    geometry, `request_repaint` wiring, one `examples/` demo.
 3. `egui-vim-nav`: focus graph, navigator, key handler, registration API,
    one `examples/` demo.
-4. `egui-themes`: token type, curated palettes, switcher, live preview
+4. `egui-nav-stack`: `NavStack<K>`, `NavDisplay`, one `examples/` demo;
+   `animated-transitions` feature (depends on `egui-spring`) as a
+   later, optional pass.
+5. `egui-themes`: token type, curated palettes, switcher, live preview
    panel, one `examples/` demo.
-5. Resolve the `Split` naming question (§10) before any app outside this
+6. Resolve the `Split` naming question (§10) before any app outside this
    repo takes a dependency on `egui-layout`.

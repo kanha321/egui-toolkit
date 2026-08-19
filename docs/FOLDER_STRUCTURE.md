@@ -4,21 +4,17 @@ Companion to `ARCHITECTURE_PRD.md` (the *why*) and `CODING_RULES.md` (the
 rules). This is the *where* — for any piece of code, which file it goes
 in.
 
-**Correction alongside `ARCHITECTURE_PRD.md` v5:** the library folder is
-now named `src/egui-widgetkit/` instead of the generic `src/library/`.
-Everything else about the layout below is unchanged from before — this
-is a rename, not a restructure.
+**Update alongside `ARCHITECTURE_PRD.md` v6:** a sixth crate,
+`egui-nav-stack`, joins the workspace (§4, §5). Everything else about
+the layout below — including the `src/egui-widgetkit/` folder rename
+from the previous revision — is unchanged.
 
 ---
 
 ## 1. Philosophy
 
-- **Prefer many small files over few large ones**: A file earns its existence by
-  having one reason to change, not by hitting a minimum line count.
-- **Flexible, High-Quality Architecture**: We will use the folder structure as an
-  architectural guideline rather than a rigid limit — introducing helper modules,
-  cleaner abstractions, and dedicated math/utility files wherever it makes the
-  codebase more modular and readable.
+Prefer many small files over few large ones. A file earns its existence by
+having one reason to change, not by hitting a minimum line count.
 
 ---
 
@@ -115,6 +111,19 @@ your-repo/                                      # single repo — egui-widgetkit
     │   │   └── examples/
     │   │       └── grid_navigation.rs
     │   │
+    │   ├── egui-nav-stack/                       # stub — screen back-stack, Navigation-3-style
+    │   │   ├── Cargo.toml                        # animated-transitions feature = optional egui-spring dep
+    │   │   ├── README.md
+    │   │   ├── src/
+    │   │   │   ├── lib.rs
+    │   │   │   ├── stack.rs                      # NavStack<K>: push/pop/replace_top/pop_to
+    │   │   │   ├── display.rs                    # NavDisplay<K> widget: renders top-of-stack
+    │   │   │   └── transition.rs                 # cfg(feature = "animated-transitions") only
+    │   │   ├── tests/
+    │   │   │   └── stack_push_pop_replace.rs      # plain data tests, no egui needed
+    │   │   └── examples/
+    │   │       └── stack_navigation.rs
+    │   │
     │   └── egui-themes/                          # stub
     │       ├── Cargo.toml
     │       ├── README.md
@@ -140,6 +149,7 @@ your-repo/                                      # single repo — egui-widgetkit
                 ├── layout_demo.rs                 # exercises egui-layout alone
                 ├── spring_demo.rs                  # exercises spring-core + egui-spring alone
                 ├── vim_nav_demo.rs                  # exercises egui-vim-nav alone
+                ├── nav_stack_demo.rs                # exercises egui-nav-stack alone
                 ├── theme_demo.rs                     # exercises egui-themes alone
                 └── combined_demo.rs                   # several crates together — the "looks like a real app" screen
 ```
@@ -159,12 +169,13 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-egui-layout  = { path = "../egui-widgetkit/egui-layout" }
-spring-core  = { path = "../egui-widgetkit/spring-core" }
-egui-spring  = { path = "../egui-widgetkit/egui-spring" }
-egui-vim-nav = { path = "../egui-widgetkit/egui-vim-nav" }
-egui-themes  = { path = "../egui-widgetkit/egui-themes" }
-eframe       = "0.27"
+egui-layout    = { path = "../egui-widgetkit/egui-layout" }
+spring-core    = { path = "../egui-widgetkit/spring-core" }
+egui-spring    = { path = "../egui-widgetkit/egui-spring" }
+egui-vim-nav   = { path = "../egui-widgetkit/egui-vim-nav" }
+egui-nav-stack = { path = "../egui-widgetkit/egui-nav-stack" }
+egui-themes    = { path = "../egui-widgetkit/egui-themes" }
+eframe         = "0.27"
 ```
 
 Workspace root:
@@ -177,6 +188,7 @@ members = [
   "src/egui-widgetkit/spring-core",
   "src/egui-widgetkit/egui-spring",
   "src/egui-widgetkit/egui-vim-nav",
+  "src/egui-widgetkit/egui-nav-stack",
   "src/egui-widgetkit/egui-themes",
   "src/test-app",
 ]
@@ -203,8 +215,8 @@ fn main() -> eframe::Result<()> {
 ```
 
 `app/state.rs` owns which scene is showing (`enum ActiveScene { Layout,
-Spring, VimNav, Theme, Combined }` + whatever per-scene state each demo
-needs); `app/update.rs` is the `impl eframe::App` that reads that state
+Spring, VimNav, NavStack, Theme, Combined }` + whatever per-scene state
+each demo needs); `app/update.rs` is the `impl eframe::App` that reads that state
 and calls into the matching function in `scenes/`. Each file in
 `scenes/` is a plain `fn show(ui: &mut egui::Ui, ...)`-shaped function —
 no framework beyond that.
@@ -237,7 +249,7 @@ one that actually matters for catching integration issues.
 | Task | Files touched, in order |
 |---|---|
 | **New widget inside an existing egui-widgetkit crate** | New file under that crate's `src/`, one type per file → re-export in that crate's `lib.rs` → update or add an `examples/` demo |
-| **New crate (a 6th capability)** | New directory under `src/egui-widgetkit/` → own `Cargo.toml`, `README.md`, `src/lib.rs` → add to the workspace `Cargo.toml`'s `members` → add it as a path dependency in `test-app/Cargo.toml` → at least one scene in `test-app/src/scenes/` exercising it |
+| **New crate (a 7th capability)** | New directory under `src/egui-widgetkit/` → own `Cargo.toml`, `README.md`, `src/lib.rs` → add to the workspace `Cargo.toml`'s `members` → add it as a path dependency in `test-app/Cargo.toml` → at least one scene in `test-app/src/scenes/` exercising it |
 | **New test-app scene** | New file under `test-app/src/scenes/` → re-export in `scenes.rs` → add the matching `ActiveScene` variant in `app/state.rs` and route to it in `app/update.rs` |
 | **New preset/variant inside `spring-core`** | `spring-core/src/params.rs` → new test in `spring-core/tests/` |
 

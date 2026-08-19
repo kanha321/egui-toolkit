@@ -1,6 +1,6 @@
 use eframe::egui;
 use super::state::{ActiveScene, TestAppState};
-use crate::scenes::{combined_demo, layout_demo, spring_demo, theme_demo, vim_nav_demo};
+use crate::scenes::{combined_demo, layout_demo, nav_stack_demo, spring_demo, theme_demo, vim_nav_demo};
 
 impl eframe::App for TestAppState {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -16,6 +16,7 @@ impl eframe::App for TestAppState {
                 ui.selectable_value(&mut self.active_scene, ActiveScene::Layout, "Layout");
                 ui.selectable_value(&mut self.active_scene, ActiveScene::Spring, "Spring");
                 ui.selectable_value(&mut self.active_scene, ActiveScene::VimNav, "Vim Nav");
+                ui.selectable_value(&mut self.active_scene, ActiveScene::NavStack, "Nav Stack");
                 ui.selectable_value(&mut self.active_scene, ActiveScene::Theme, "Theme");
                 ui.selectable_value(&mut self.active_scene, ActiveScene::Combined, "Combined");
             });
@@ -26,6 +27,7 @@ impl eframe::App for TestAppState {
                 ActiveScene::Layout => layout_demo::show(ui),
                 ActiveScene::Spring => spring_demo::show(ui),
                 ActiveScene::VimNav => vim_nav_demo::show(ui),
+                ActiveScene::NavStack => nav_stack_demo::show(ui),
                 ActiveScene::Theme => theme_demo::show(ui),
                 ActiveScene::Combined => combined_demo::show(ui),
             }
