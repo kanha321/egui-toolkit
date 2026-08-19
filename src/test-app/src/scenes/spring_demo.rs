@@ -1,8 +1,9 @@
-//! Interactive physics demonstration for spring-core.
+//! Interactive physics demonstration for spring-core and egui-spring.
 
 use egui::{
     Color32, Pos2, Rect, Rounding, Sense, Stroke, Ui, Vec2,
 };
+use egui_spring::SpringRect;
 use spring_core::{Spring, SpringParams};
 
 /// State for the Spring demo scene owned by `TestAppState`.
@@ -18,6 +19,9 @@ pub struct SpringDemoState {
     pub history_snappy: Vec<f32>,
     pub history_bouncy: Vec<f32>,
     pub history_custom: Vec<f32>,
+    // 2D SpringRect elastic smear selection highlight demo
+    pub selection_highlight: SpringRect,
+    pub selected_card: usize,
 }
 
 impl Default for SpringDemoState {
@@ -35,6 +39,12 @@ impl Default for SpringDemoState {
             history_snappy: Vec::new(),
             history_bouncy: Vec::new(),
             history_custom: Vec::new(),
+            selection_highlight: SpringRect::new(Rect::ZERO)
+                .with_fill(Color32::from_rgba_unmultiplied(137, 180, 250, 45))
+                .with_stroke(Stroke::new(2.0, Color32::from_rgb(137, 180, 250)))
+                .with_rounding(8.0)
+                .with_params(SpringParams::snappy()),
+            selected_card: 0,
         }
     }
 }
@@ -63,6 +73,8 @@ impl SpringDemoState {
         self.bouncy_spring.update(dt);
         self.custom_spring.update(dt);
 
+        self.selection_highlight.update(dt);
+
         // Record history trace for oscilloscope visualization (keep last 140 points)
         self.history_gentle.push(self.gentle_spring.value());
         self.history_snappy.push(self.snappy_spring.value());
@@ -80,6 +92,7 @@ impl SpringDemoState {
             || !self.snappy_spring.is_settled()
             || !self.bouncy_spring.is_settled()
             || !self.custom_spring.is_settled()
+            || !self.selection_highlight.is_settled()
     }
 }
 
@@ -95,10 +108,10 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
     ui.horizontal(|ui| {
         ui.colored_label(
             Color32::from_rgb(137, 180, 250),
-            egui::RichText::new("⚡ spring-core Analytical Physics Playground").strong().size(16.0),
+            egui::RichText::new("⚡ spring-core & egui-spring Physics Showcase").strong().size(16.0),
         );
         ui.label(
-            egui::RichText::new("• 100% framerate-independent closed-form ODE solver")
+            egui::RichText::new("• Analytical ODE 1D Solvers + 4-Corner Bézier Elastic Smear")
                 .size(12.0)
                 .color(Color32::from_rgb(166, 173, 200)),
         );
@@ -123,10 +136,10 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
         }
     });
 
-    ui.add_space(6.0);
+    ui.add_space(4.0);
 
     // 4 Tracks Comparison
-    let track_height = 42.0;
+    let track_height = 36.0;
     render_spring_track(
         ui,
         "🟣 Gentle Preset (ω0 = 14, ζ = 0.90)",
@@ -138,7 +151,7 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
         |new_target| state.set_target(new_target),
     );
 
-    ui.add_space(4.0);
+    ui.add_space(3.0);
     render_spring_track(
         ui,
         "🟢 Snappy Preset (ω0 = 28, ζ = 0.85)",
@@ -150,7 +163,7 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
         |new_target| state.set_target(new_target),
     );
 
-    ui.add_space(4.0);
+    ui.add_space(3.0);
     render_spring_track(
         ui,
         "🟠 Bouncy Preset (ω0 = 18, ζ = 0.50)",
@@ -162,18 +175,18 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
         |new_target| state.set_target(new_target),
     );
 
-    ui.add_space(4.0);
+    ui.add_space(3.0);
     let regime_label = if state.custom_damping < 0.9999 {
-        "Underdamped (Oscillating)"
+        "Underdamped"
     } else if state.custom_damping > 1.0001 {
-        "Overdamped (Sluggish)"
+        "Overdamped"
     } else {
         "Critically Damped"
     };
 
     render_spring_track(
         ui,
-        &format!("🔵 Custom Spring (ω0 = {:.0}, ζ = {:.2}) — {}", state.custom_frequency, state.custom_damping, regime_label),
+        &format!("🔵 Custom (ω0 = {:.0}, ζ = {:.2}) — {}", state.custom_frequency, state.custom_damping, regime_label),
         state.custom_spring.value(),
         state.custom_spring.velocity(),
         state.target_val,
@@ -184,13 +197,111 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
 
     ui.add_space(6.0);
 
+    // Middle Section: 2D SpringRect Elastic Smear Demo
+    ui.group(|ui| {
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("🎯 egui-spring: 4-Corner Elastic Smear Selection Highlight").strong());
+            ui.label(egui::RichText::new("(Click any card below to watch the highlight stretch and smear)").size(11.0).color(Color32::from_rgb(147, 153, 178)));
+        });
+        ui.add_space(4.0);
+
+        let cards = [
+            ("📁 Projects", "Workspaces & Skeletons"),
+            ("⚙️ Layout", "Constraint Relaxation"),
+            ("🧮 ODE Solver", "Closed-Form Continuous"),
+            ("✨ SpringRect", "Bézier Elastic Smear"),
+            ("⌨️ Vim Nav", "HJKL Focus Graph"),
+            ("🎨 Theming", "Token-Based Palettes"),
+        ];
+
+        let mut target_rect = None;
+        let card_w = (ui.available_width() - 16.0) / 3.0;
+
+        ui.horizontal(|ui| {
+            for (idx, (title, subtitle)) in cards.iter().take(3).enumerate() {
+                let (rect, resp) = ui.allocate_exact_size(Vec2::new(card_w, 42.0), Sense::click());
+                if resp.clicked() {
+                    state.selected_card = idx;
+                }
+                if idx == state.selected_card {
+                    target_rect = Some(rect);
+                }
+
+                ui.painter().rect(
+                    rect,
+                    Rounding::same(8.0),
+                    Color32::from_rgb(30, 30, 46),
+                    Stroke::new(1.0, Color32::from_rgb(49, 50, 68)),
+                );
+                ui.painter().text(
+                    rect.min + Vec2::new(10.0, 6.0),
+                    egui::Align2::LEFT_TOP,
+                    *title,
+                    egui::FontId::proportional(12.5),
+                    Color32::from_rgb(205, 214, 244),
+                );
+                ui.painter().text(
+                    rect.min + Vec2::new(10.0, 22.0),
+                    egui::Align2::LEFT_TOP,
+                    *subtitle,
+                    egui::FontId::proportional(10.5),
+                    Color32::from_rgb(147, 153, 178),
+                );
+            }
+        });
+
+        ui.add_space(4.0);
+
+        ui.horizontal(|ui| {
+            for (idx, (title, subtitle)) in cards.iter().skip(3).enumerate() {
+                let real_idx = idx + 3;
+                let (rect, resp) = ui.allocate_exact_size(Vec2::new(card_w, 42.0), Sense::click());
+                if resp.clicked() {
+                    state.selected_card = real_idx;
+                }
+                if real_idx == state.selected_card {
+                    target_rect = Some(rect);
+                }
+
+                ui.painter().rect(
+                    rect,
+                    Rounding::same(8.0),
+                    Color32::from_rgb(30, 30, 46),
+                    Stroke::new(1.0, Color32::from_rgb(49, 50, 68)),
+                );
+                ui.painter().text(
+                    rect.min + Vec2::new(10.0, 6.0),
+                    egui::Align2::LEFT_TOP,
+                    *title,
+                    egui::FontId::proportional(12.5),
+                    Color32::from_rgb(205, 214, 244),
+                );
+                ui.painter().text(
+                    rect.min + Vec2::new(10.0, 22.0),
+                    egui::Align2::LEFT_TOP,
+                    *subtitle,
+                    egui::FontId::proportional(10.5),
+                    Color32::from_rgb(147, 153, 178),
+                );
+            }
+        });
+
+        if let Some(target) = target_rect {
+            state.selection_highlight.set_target(target);
+        }
+
+        // Paint the SpringRect highlight with Bézier corners over the selected card
+        state.selection_highlight.paint(ui.painter());
+    });
+
+    ui.add_space(6.0);
+
     // Tuning Sliders and Real-time Oscilloscope
     ui.columns(2, |cols| {
         cols[0].group(|ui| {
             ui.label(egui::RichText::new("⚙️ Live Parameter Tuning").strong());
             ui.add(egui::Slider::new(&mut state.custom_frequency, 2.0..=50.0).text("Frequency ω0 (rad/s)"));
             ui.add(egui::Slider::new(&mut state.custom_damping, 0.05..=2.5).text("Damping Ratio ζ"));
-            ui.label(format!("Current Regime: {}", regime_label));
             ui.label(format!("Status: {}", if state.is_animating() { "⚡ Active Motion (repainting)" } else { "✓ Settled" }));
         });
 
@@ -237,7 +348,7 @@ fn render_spring_track(
     let track_min_x = rect.min.x + pad;
     let track_max_x = rect.max.x - pad;
     let track_w = track_max_x - track_min_x;
-    let track_y = rect.center().y + 4.0;
+    let track_y = rect.center().y + 3.0;
 
     // Track rail
     painter.line_segment(
@@ -248,7 +359,7 @@ fn render_spring_track(
     // Target marker (dotted vertical pin)
     let target_x = track_min_x + target_val * track_w;
     painter.line_segment(
-        [Pos2::new(target_x, track_y - 10.0), Pos2::new(target_x, track_y + 10.0)],
+        [Pos2::new(target_x, track_y - 8.0), Pos2::new(target_x, track_y + 8.0)],
         Stroke::new(2.0, Color32::from_rgb(186, 194, 222)),
     );
 
@@ -259,7 +370,7 @@ fn render_spring_track(
     for i in 1..=coil_segments {
         let frac = i as f32 / coil_segments as f32;
         let x = track_min_x + (current_x - track_min_x) * frac;
-        let y_offset = if i % 2 == 1 { -4.0 } else { 4.0 };
+        let y_offset = if i % 2 == 1 { -3.5 } else { 3.5 };
         let pt = Pos2::new(x, track_y + y_offset);
         painter.line_segment([prev_pt, pt], Stroke::new(1.0, Color32::from_rgb(108, 112, 134)));
         prev_pt = pt;
@@ -269,26 +380,26 @@ fn render_spring_track(
     // Animated ball head
     painter.circle(
         Pos2::new(current_x, track_y),
-        8.0,
+        7.0,
         accent,
         Stroke::new(1.5, Color32::WHITE),
     );
 
     // Title and telemetry text
     painter.text(
-        Pos2::new(rect.min.x + 10.0, rect.min.y + 10.0),
+        Pos2::new(rect.min.x + 10.0, rect.min.y + 8.0),
         egui::Align2::LEFT_TOP,
         title,
-        egui::FontId::proportional(12.0),
+        egui::FontId::proportional(11.5),
         Color32::from_rgb(205, 214, 244),
     );
 
     let telemetry = format!("pos: {:.2} • vel: {:+.1}", current_val, velocity);
     painter.text(
-        Pos2::new(rect.max.x - 10.0, rect.min.y + 10.0),
+        Pos2::new(rect.max.x - 10.0, rect.min.y + 8.0),
         egui::Align2::RIGHT_TOP,
         telemetry,
-        egui::FontId::monospace(10.5),
+        egui::FontId::monospace(10.0),
         Color32::from_rgb(147, 153, 178),
     );
 }

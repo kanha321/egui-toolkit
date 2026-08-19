@@ -992,6 +992,7 @@ dependencies = [
 name = "egui-spring"
 version = "0.1.0"
 dependencies = [
+ "eframe",
  "egui",
  "spring-core",
 ]
