@@ -1,0 +1,9 @@
+[package]
+name = "egui-themes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Token-based theme system, palette presets, and live preview for egui"
+
+[dependencies]
+egui = { workspace = true }

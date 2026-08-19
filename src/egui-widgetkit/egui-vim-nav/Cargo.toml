@@ -1,0 +1,9 @@
+[package]
+name = "egui-vim-nav"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Vim-style (HJKL) keyboard navigation graph for egui"
+
+[dependencies]
+egui = { workspace = true }

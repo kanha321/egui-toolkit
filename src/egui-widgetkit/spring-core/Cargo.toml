@@ -1,0 +1,9 @@
+[package]
+name = "spring-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Framework-agnostic analytical spring physics solver (pure math)"
+
+[dependencies]
+# Pure math — zero egui dependency (CODING_RULES §5)

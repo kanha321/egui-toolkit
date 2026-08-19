@@ -1,0 +1,15 @@
+[package]
+name = "test-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+egui-layout  = { path = "../egui-widgetkit/egui-layout" }
+spring-core  = { path = "../egui-widgetkit/spring-core" }
+egui-spring  = { path = "../egui-widgetkit/egui-spring" }
+egui-vim-nav = { path = "../egui-widgetkit/egui-vim-nav" }
+egui-themes  = { path = "../egui-widgetkit/egui-themes" }
+eframe       = { workspace = true }
+egui         = { workspace = true }

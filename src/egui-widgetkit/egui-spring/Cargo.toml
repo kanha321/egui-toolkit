@@ -1,0 +1,10 @@
+[package]
+name = "egui-spring"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Spring-driven animated widgets and selection highlights for egui"
+
+[dependencies]
+spring-core = { path = "../spring-core" }
+egui = { workspace = true }

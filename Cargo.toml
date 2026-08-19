@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = [
+    "src/egui-widgetkit/egui-layout",
+    "src/egui-widgetkit/spring-core",
+    "src/egui-widgetkit/egui-spring",
+    "src/egui-widgetkit/egui-vim-nav",
+    "src/egui-widgetkit/egui-themes",
+    "src/test-app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+authors = ["egui-widgetkit contributors"]
+
+[workspace.dependencies]
+# Pin egui & eframe version across all crates to ensure compatibility
+egui = "0.27"
+eframe = "0.27"
