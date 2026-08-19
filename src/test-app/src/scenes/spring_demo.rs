@@ -6,6 +6,16 @@ use egui::{
 use egui_spring::SpringRect;
 use spring_core::{Spring, SpringParams};
 
+/// The 4 available spring animation presets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum HighlightPreset {
+    Gentle,
+    #[default]
+    Snappy,
+    Bouncy,
+    Custom,
+}
+
 /// State for the Spring demo scene owned by `TestAppState`.
 pub struct SpringDemoState {
     pub gentle_spring: Spring,
@@ -22,6 +32,7 @@ pub struct SpringDemoState {
     // 2D SpringRect elastic smear selection highlight demo
     pub selection_highlight: SpringRect,
     pub selected_card: usize,
+    pub highlight_preset: HighlightPreset,
 }
 
 impl Default for SpringDemoState {
@@ -40,11 +51,12 @@ impl Default for SpringDemoState {
             history_bouncy: Vec::new(),
             history_custom: Vec::new(),
             selection_highlight: SpringRect::new(Rect::ZERO)
-                .with_fill(Color32::from_rgba_unmultiplied(137, 180, 250, 45))
-                .with_stroke(Stroke::new(2.0, Color32::from_rgb(137, 180, 250)))
+                .with_fill(Color32::from_rgba_unmultiplied(166, 227, 161, 40))
+                .with_stroke(Stroke::new(2.0, Color32::from_rgb(166, 227, 161)))
                 .with_rounding(8.0)
                 .with_params(SpringParams::snappy()),
             selected_card: 0,
+            highlight_preset: HighlightPreset::Snappy,
         }
     }
 }
@@ -67,6 +79,26 @@ impl SpringDemoState {
 
     pub fn update(&mut self, dt: f32) {
         self.custom_spring.params = SpringParams::new(self.custom_frequency, self.custom_damping);
+
+        // Sync active highlight preset parameters and matching colors
+        let (preset_params, accent_color) = match self.highlight_preset {
+            HighlightPreset::Gentle => (SpringParams::gentle(), Color32::from_rgb(203, 166, 247)),
+            HighlightPreset::Snappy => (SpringParams::snappy(), Color32::from_rgb(166, 227, 161)),
+            HighlightPreset::Bouncy => (SpringParams::bouncy(), Color32::from_rgb(250, 179, 135)),
+            HighlightPreset::Custom => (
+                SpringParams::new(self.custom_frequency, self.custom_damping),
+                Color32::from_rgb(137, 220, 235),
+            ),
+        };
+
+        self.selection_highlight.corners.params = preset_params;
+        self.selection_highlight.stroke.color = accent_color;
+        self.selection_highlight.fill_color = Color32::from_rgba_unmultiplied(
+            accent_color.r(),
+            accent_color.g(),
+            accent_color.b(),
+            40,
+        );
 
         self.gentle_spring.update(dt);
         self.snappy_spring.update(dt);
@@ -116,7 +148,7 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
                 .color(Color32::from_rgb(166, 173, 200)),
         );
     });
-    ui.add_space(4.0);
+    ui.add_space(3.0);
 
     // Control bar
     ui.horizontal(|ui| {
@@ -136,10 +168,10 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
         }
     });
 
-    ui.add_space(4.0);
+    ui.add_space(3.0);
 
     // 4 Tracks Comparison
-    let track_height = 36.0;
+    let track_height = 34.0;
     render_spring_track(
         ui,
         "🟣 Gentle Preset (ω0 = 14, ζ = 0.90)",
@@ -151,7 +183,7 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
         |new_target| state.set_target(new_target),
     );
 
-    ui.add_space(3.0);
+    ui.add_space(2.0);
     render_spring_track(
         ui,
         "🟢 Snappy Preset (ω0 = 28, ζ = 0.85)",
@@ -163,7 +195,7 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
         |new_target| state.set_target(new_target),
     );
 
-    ui.add_space(3.0);
+    ui.add_space(2.0);
     render_spring_track(
         ui,
         "🟠 Bouncy Preset (ω0 = 18, ζ = 0.50)",
@@ -175,7 +207,7 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
         |new_target| state.set_target(new_target),
     );
 
-    ui.add_space(3.0);
+    ui.add_space(2.0);
     let regime_label = if state.custom_damping < 0.9999 {
         "Underdamped"
     } else if state.custom_damping > 1.0001 {
@@ -195,13 +227,18 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
         |new_target| state.set_target(new_target),
     );
 
-    ui.add_space(6.0);
+    ui.add_space(5.0);
 
-    // Middle Section: 2D SpringRect Elastic Smear Demo
+    // Middle Section: 2D SpringRect Elastic Smear Demo with 4 Animation Presets Selector
     ui.group(|ui| {
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("🎯 egui-spring: 4-Corner Elastic Smear Selection Highlight").strong());
-            ui.label(egui::RichText::new("(Click any card below to watch the highlight stretch and smear)").size(11.0).color(Color32::from_rgb(147, 153, 178)));
+            ui.label(egui::RichText::new("🎯 2D Elastic Smear Selection Highlight").strong());
+            ui.separator();
+            ui.label("Active Animation Type:");
+            ui.selectable_value(&mut state.highlight_preset, HighlightPreset::Gentle, "🟣 Gentle");
+            ui.selectable_value(&mut state.highlight_preset, HighlightPreset::Snappy, "🟢 Snappy");
+            ui.selectable_value(&mut state.highlight_preset, HighlightPreset::Bouncy, "🟠 Bouncy");
+            ui.selectable_value(&mut state.highlight_preset, HighlightPreset::Custom, "🔵 Custom");
         });
         ui.add_space(4.0);
 
@@ -219,7 +256,7 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
 
         ui.horizontal(|ui| {
             for (idx, (title, subtitle)) in cards.iter().take(3).enumerate() {
-                let (rect, resp) = ui.allocate_exact_size(Vec2::new(card_w, 42.0), Sense::click());
+                let (rect, resp) = ui.allocate_exact_size(Vec2::new(card_w, 40.0), Sense::click());
                 if resp.clicked() {
                     state.selected_card = idx;
                 }
@@ -234,14 +271,14 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
                     Stroke::new(1.0, Color32::from_rgb(49, 50, 68)),
                 );
                 ui.painter().text(
-                    rect.min + Vec2::new(10.0, 6.0),
+                    rect.min + Vec2::new(10.0, 5.0),
                     egui::Align2::LEFT_TOP,
                     *title,
                     egui::FontId::proportional(12.5),
                     Color32::from_rgb(205, 214, 244),
                 );
                 ui.painter().text(
-                    rect.min + Vec2::new(10.0, 22.0),
+                    rect.min + Vec2::new(10.0, 21.0),
                     egui::Align2::LEFT_TOP,
                     *subtitle,
                     egui::FontId::proportional(10.5),
@@ -255,7 +292,7 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
         ui.horizontal(|ui| {
             for (idx, (title, subtitle)) in cards.iter().skip(3).enumerate() {
                 let real_idx = idx + 3;
-                let (rect, resp) = ui.allocate_exact_size(Vec2::new(card_w, 42.0), Sense::click());
+                let (rect, resp) = ui.allocate_exact_size(Vec2::new(card_w, 40.0), Sense::click());
                 if resp.clicked() {
                     state.selected_card = real_idx;
                 }
@@ -270,14 +307,14 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
                     Stroke::new(1.0, Color32::from_rgb(49, 50, 68)),
                 );
                 ui.painter().text(
-                    rect.min + Vec2::new(10.0, 6.0),
+                    rect.min + Vec2::new(10.0, 5.0),
                     egui::Align2::LEFT_TOP,
                     *title,
                     egui::FontId::proportional(12.5),
                     Color32::from_rgb(205, 214, 244),
                 );
                 ui.painter().text(
-                    rect.min + Vec2::new(10.0, 22.0),
+                    rect.min + Vec2::new(10.0, 21.0),
                     egui::Align2::LEFT_TOP,
                     *subtitle,
                     egui::FontId::proportional(10.5),
@@ -294,7 +331,7 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
         state.selection_highlight.paint(ui.painter());
     });
 
-    ui.add_space(6.0);
+    ui.add_space(5.0);
 
     // Tuning Sliders and Real-time Oscilloscope
     ui.columns(2, |cols| {
