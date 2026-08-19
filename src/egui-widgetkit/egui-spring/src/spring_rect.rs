@@ -50,7 +50,7 @@ impl SpringRect {
         Self {
             corners: CornerSprings::new(target_rect, 22.0, 0.65),
             alpha_spring: Spring::new(1.0, SpringParams::new(24.0, 0.75)),
-            fill_color: Color32::from_rgba_unmultiplied(0, 255, 136, 16),
+            fill_color: Color32::from_rgba_unmultiplied(0, 255, 136, 14),
             stroke: Stroke::new(1.5, Color32::from_rgb(0, 255, 136)),
             target_rounding: default_rounding,
             start_rounding: default_rounding,
@@ -96,18 +96,27 @@ impl SpringRect {
 
     /// Retargets the spring highlight to a new bounding rectangle.
     pub fn set_target(&mut self, target: Rect) {
+        self.set_target_with_rounding(target, self.target_rounding);
+    }
+
+    /// Retargets the spring highlight with a specific target shape rounding for morphing.
+    pub fn set_target_with_rounding(&mut self, target: Rect, rounding: f32) {
         let padded = target.expand(self.padding);
         let new_target_center = padded.center();
 
-        if (new_target_center - self.target_center).length() > 1.0 {
+        if (new_target_center - self.target_center).length() > 1.0 || (rounding - self.target_rounding).abs() > 0.1 {
             self.start_center = self.corners.center();
             self.start_rounding = self.current_rounding;
             self.target_center = new_target_center;
+            self.target_rounding = rounding.max(0.0);
         }
 
         self.corners.target_rect = padded;
         if !self.corners.initialized {
             self.reset(target);
+            self.current_rounding = rounding;
+            self.target_rounding = rounding;
+            self.start_rounding = rounding;
         }
     }
 

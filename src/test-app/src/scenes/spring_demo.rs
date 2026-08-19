@@ -17,6 +17,15 @@ pub enum HighlightPreset {
     Custom,
 }
 
+/// A shape component in the Bézier morphing showcase.
+pub struct MorphComponent {
+    pub label: &'static str,
+    pub description: &'static str,
+    pub size: Vec2,
+    pub rounding: f32,
+    pub is_circle: bool,
+}
+
 /// State for the Spring demo scene owned by `TestAppState`.
 pub struct SpringDemoState {
     pub gentle_spring: Spring,
@@ -35,7 +44,7 @@ pub struct SpringDemoState {
     pub history_custom: Vec<f32>,
     // 2D SpringRect elastic smear selection highlight demo
     pub selection_highlight: SpringRect,
-    pub selected_card: usize,
+    pub selected_component: usize,
     pub highlight_preset: HighlightPreset,
 }
 
@@ -60,9 +69,9 @@ impl Default for SpringDemoState {
             selection_highlight: SpringRect::new(Rect::ZERO)
                 .with_fill(Color32::from_rgba_unmultiplied(0, 255, 136, 14))
                 .with_stroke(Stroke::new(1.5, Color32::from_rgb(0, 255, 136)))
-                .with_rounding(6.0)
+                .with_rounding(22.0)
                 .with_padding(3.0),
-            selected_card: 0,
+            selected_component: 0,
             highlight_preset: HighlightPreset::OpenRGB,
         }
     }
@@ -160,12 +169,12 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
             egui::RichText::new("⚡ spring-core & egui-spring Physics Showcase").strong().size(16.0),
         );
         ui.label(
-            egui::RichText::new("• Analytical ODE 1D Solvers + 4-Corner Bézier Elastic Smear")
+            egui::RichText::new("• Analytical ODE 1D Solvers + Multi-Shape Bézier Morphing")
                 .size(12.0)
                 .color(Color32::from_rgb(166, 173, 200)),
         );
     });
-    ui.add_space(3.0);
+    ui.add_space(2.0);
 
     // Control bar
     ui.horizontal(|ui| {
@@ -185,10 +194,10 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
         }
     });
 
-    ui.add_space(3.0);
+    ui.add_space(2.0);
 
     // 5 Tracks Comparison
-    let track_height = 32.0;
+    let track_height = 30.0;
     render_spring_track(
         ui,
         "🟣 Gentle (ω0 = 18, ζ = 0.90)",
@@ -258,10 +267,10 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
 
     ui.add_space(4.0);
 
-    // Middle Section: 2D SpringRect Elastic Smear Demo with 5 Animation Presets Selector
+    // Multi-Shape Bézier Morphing Showcase
     ui.group(|ui| {
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("🎯 2D Elastic Smear Selection Highlight").strong());
+            ui.label(egui::RichText::new("🎯 Multi-Shape Bézier Morphing Highlight").strong());
             ui.separator();
             ui.label("Preset:");
             ui.selectable_value(&mut state.highlight_preset, HighlightPreset::Gentle, "🟣 Gentle");
@@ -270,94 +279,176 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
             ui.selectable_value(&mut state.highlight_preset, HighlightPreset::OpenRGB, "💚 OpenRGB");
             ui.selectable_value(&mut state.highlight_preset, HighlightPreset::Custom, "🔵 Custom");
         });
-        ui.add_space(3.0);
+        ui.add_space(4.0);
 
-        let cards = [
-            ("📁 Projects", "Workspaces & Skeletons"),
-            ("⚙️ Layout", "Constraint Relaxation"),
-            ("🧮 ODE Solver", "Closed-Form Continuous"),
-            ("✨ SpringRect", "Bézier Elastic Smear"),
-            ("⌨️ Vim Nav", "HJKL Focus Graph"),
-            ("🎨 Theming", "Token-Based Palettes"),
+        // Define distinct geometric shapes to demonstrate dynamic curvature morphing
+        let components = [
+            MorphComponent {
+                label: "⭕ Circle",
+                description: "r = 22px",
+                size: Vec2::new(56.0, 44.0),
+                rounding: 22.0,
+                is_circle: true,
+            },
+            MorphComponent {
+                label: "⬛ Sharp Card",
+                description: "r = 0px (Square)",
+                size: Vec2::new(125.0, 44.0),
+                rounding: 0.0,
+                is_circle: false,
+            },
+            MorphComponent {
+                label: "💊 Pill Capsule",
+                description: "r = 16px (Badge)",
+                size: Vec2::new(115.0, 44.0),
+                rounding: 16.0,
+                is_circle: false,
+            },
+            MorphComponent {
+                label: "📱 Squircle Tile",
+                description: "r = 12px (Smooth)",
+                size: Vec2::new(110.0, 44.0),
+                rounding: 12.0,
+                is_circle: false,
+            },
+            MorphComponent {
+                label: "🔲 Standard Card",
+                description: "r = 6px (Sleek)",
+                size: Vec2::new(120.0, 44.0),
+                rounding: 6.0,
+                is_circle: false,
+            },
+            MorphComponent {
+                label: "🔘 Mini-Circle",
+                description: "r = 16px (Icon)",
+                size: Vec2::new(44.0, 44.0),
+                rounding: 22.0,
+                is_circle: true,
+            },
         ];
 
         let mut target_rect = None;
-        let card_w = (ui.available_width() - 16.0) / 3.0;
+        let mut target_rounding = 6.0;
 
+        // Row 1: First 3 diverse shapes
         ui.horizontal(|ui| {
-            for (idx, (title, subtitle)) in cards.iter().take(3).enumerate() {
-                let (rect, resp) = ui.allocate_exact_size(Vec2::new(card_w, 38.0), Sense::click());
+            for (idx, comp) in components.iter().take(3).enumerate() {
+                let (rect, resp) = ui.allocate_exact_size(comp.size, Sense::click());
                 if resp.clicked() {
-                    state.selected_card = idx;
+                    state.selected_component = idx;
                 }
-                if idx == state.selected_card {
+                if idx == state.selected_component {
                     target_rect = Some(rect);
+                    target_rounding = comp.rounding;
                 }
 
+                // Render component geometry
                 ui.painter().rect(
                     rect,
-                    Rounding::same(8.0),
+                    Rounding::same(comp.rounding),
                     Color32::from_rgb(30, 30, 46),
                     Stroke::new(1.0, Color32::from_rgb(49, 50, 68)),
                 );
-                ui.painter().text(
-                    rect.min + Vec2::new(10.0, 5.0),
-                    egui::Align2::LEFT_TOP,
-                    *title,
-                    egui::FontId::proportional(12.0),
-                    Color32::from_rgb(205, 214, 244),
-                );
-                ui.painter().text(
-                    rect.min + Vec2::new(10.0, 20.0),
-                    egui::Align2::LEFT_TOP,
-                    *subtitle,
-                    egui::FontId::proportional(10.0),
-                    Color32::from_rgb(147, 153, 178),
-                );
+
+                let center = rect.center();
+                if comp.is_circle && comp.size.x <= 56.0 {
+                    ui.painter().text(
+                        center - Vec2::new(0.0, 6.0),
+                        egui::Align2::CENTER_CENTER,
+                        comp.label,
+                        egui::FontId::proportional(11.5),
+                        Color32::from_rgb(205, 214, 244),
+                    );
+                    ui.painter().text(
+                        center + Vec2::new(0.0, 8.0),
+                        egui::Align2::CENTER_CENTER,
+                        comp.description,
+                        egui::FontId::monospace(9.0),
+                        Color32::from_rgb(147, 153, 178),
+                    );
+                } else {
+                    ui.painter().text(
+                        rect.min + Vec2::new(12.0, 8.0),
+                        egui::Align2::LEFT_TOP,
+                        comp.label,
+                        egui::FontId::proportional(12.5),
+                        Color32::from_rgb(205, 214, 244),
+                    );
+                    ui.painter().text(
+                        rect.min + Vec2::new(12.0, 24.0),
+                        egui::Align2::LEFT_TOP,
+                        comp.description,
+                        egui::FontId::monospace(10.0),
+                        Color32::from_rgb(147, 153, 178),
+                    );
+                }
+                ui.add_space(6.0);
             }
         });
 
-        ui.add_space(3.0);
+        ui.add_space(6.0);
 
+        // Row 2: Remaining 3 shapes
         ui.horizontal(|ui| {
-            for (idx, (title, subtitle)) in cards.iter().skip(3).enumerate() {
+            for (idx, comp) in components.iter().skip(3).enumerate() {
                 let real_idx = idx + 3;
-                let (rect, resp) = ui.allocate_exact_size(Vec2::new(card_w, 38.0), Sense::click());
+                let (rect, resp) = ui.allocate_exact_size(comp.size, Sense::click());
                 if resp.clicked() {
-                    state.selected_card = real_idx;
+                    state.selected_component = real_idx;
                 }
-                if real_idx == state.selected_card {
+                if real_idx == state.selected_component {
                     target_rect = Some(rect);
+                    target_rounding = comp.rounding;
                 }
 
                 ui.painter().rect(
                     rect,
-                    Rounding::same(8.0),
+                    Rounding::same(comp.rounding),
                     Color32::from_rgb(30, 30, 46),
                     Stroke::new(1.0, Color32::from_rgb(49, 50, 68)),
                 );
-                ui.painter().text(
-                    rect.min + Vec2::new(10.0, 5.0),
-                    egui::Align2::LEFT_TOP,
-                    *title,
-                    egui::FontId::proportional(12.0),
-                    Color32::from_rgb(205, 214, 244),
-                );
-                ui.painter().text(
-                    rect.min + Vec2::new(10.0, 20.0),
-                    egui::Align2::LEFT_TOP,
-                    *subtitle,
-                    egui::FontId::proportional(10.0),
-                    Color32::from_rgb(147, 153, 178),
-                );
+
+                let center = rect.center();
+                if comp.is_circle && comp.size.x <= 56.0 {
+                    ui.painter().text(
+                        center - Vec2::new(0.0, 6.0),
+                        egui::Align2::CENTER_CENTER,
+                        comp.label,
+                        egui::FontId::proportional(11.0),
+                        Color32::from_rgb(205, 214, 244),
+                    );
+                    ui.painter().text(
+                        center + Vec2::new(0.0, 8.0),
+                        egui::Align2::CENTER_CENTER,
+                        comp.description,
+                        egui::FontId::monospace(9.0),
+                        Color32::from_rgb(147, 153, 178),
+                    );
+                } else {
+                    ui.painter().text(
+                        rect.min + Vec2::new(12.0, 8.0),
+                        egui::Align2::LEFT_TOP,
+                        comp.label,
+                        egui::FontId::proportional(12.5),
+                        Color32::from_rgb(205, 214, 244),
+                    );
+                    ui.painter().text(
+                        rect.min + Vec2::new(12.0, 24.0),
+                        egui::Align2::LEFT_TOP,
+                        comp.description,
+                        egui::FontId::monospace(10.0),
+                        Color32::from_rgb(147, 153, 178),
+                    );
+                }
+                ui.add_space(6.0);
             }
         });
 
         if let Some(target) = target_rect {
-            state.selection_highlight.set_target(target);
+            state.selection_highlight.set_target_with_rounding(target, target_rounding);
         }
 
-        // Paint the SpringRect highlight with Bézier corners and padding over the selected card
+        // Paint the SpringRect highlight with Bézier curves morphing live across shapes
         state.selection_highlight.paint(ui.painter());
     });
 
@@ -370,7 +461,11 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
             ui.add(egui::Slider::new(&mut state.speed_scale, 0.5..=3.0).text("Speed Scale (Multiplier)").suffix("x"));
             ui.add(egui::Slider::new(&mut state.custom_frequency, 5.0..=60.0).text("Frequency ω0 (rad/s)"));
             ui.add(egui::Slider::new(&mut state.custom_damping, 0.05..=2.5).text("Damping Ratio ζ"));
-            ui.label(format!("Status: {}", if state.is_animating() { "⚡ Active Motion (repainting)" } else { "✓ Settled" }));
+            ui.label(format!(
+                "Status: {} | Rounding: {:.1}px",
+                if state.is_animating() { "⚡ Active Morphing" } else { "✓ Settled" },
+                state.selection_highlight.current_rounding
+            ));
         });
 
         cols[1].group(|ui| {
@@ -455,19 +550,19 @@ fn render_spring_track(
 
     // Title and telemetry text
     painter.text(
-        Pos2::new(rect.min.x + 10.0, rect.min.y + 8.0),
+        Pos2::new(rect.min.x + 10.0, rect.min.y + 7.0),
         egui::Align2::LEFT_TOP,
         title,
-        egui::FontId::proportional(11.5),
+        egui::FontId::proportional(11.0),
         Color32::from_rgb(205, 214, 244),
     );
 
     let telemetry = format!("pos: {:.2} • vel: {:+.1}", current_val, velocity);
     painter.text(
-        Pos2::new(rect.max.x - 10.0, rect.min.y + 8.0),
+        Pos2::new(rect.max.x - 10.0, rect.min.y + 7.0),
         egui::Align2::RIGHT_TOP,
         telemetry,
-        egui::FontId::monospace(10.0),
+        egui::FontId::monospace(9.5),
         Color32::from_rgb(147, 153, 178),
     );
 }
