@@ -1,6 +1,340 @@
-use egui::Ui;
+//! Interactive physics demonstration for spring-core.
 
-pub fn show(ui: &mut Ui) {
-    ui.heading("spring-core & egui-spring Demo");
-    ui.label("Spring physics showcase");
+use egui::{
+    Color32, Pos2, Rect, Rounding, Sense, Stroke, Ui, Vec2,
+};
+use spring_core::{Spring, SpringParams};
+
+/// State for the Spring demo scene owned by `TestAppState`.
+pub struct SpringDemoState {
+    pub gentle_spring: Spring,
+    pub snappy_spring: Spring,
+    pub bouncy_spring: Spring,
+    pub custom_spring: Spring,
+    pub custom_frequency: f32,
+    pub custom_damping: f32,
+    pub target_val: f32,
+    pub history_gentle: Vec<f32>,
+    pub history_snappy: Vec<f32>,
+    pub history_bouncy: Vec<f32>,
+    pub history_custom: Vec<f32>,
+}
+
+impl Default for SpringDemoState {
+    fn default() -> Self {
+        let initial_target = 0.5;
+        Self {
+            gentle_spring: Spring::new(initial_target, SpringParams::gentle()),
+            snappy_spring: Spring::new(initial_target, SpringParams::snappy()),
+            bouncy_spring: Spring::new(initial_target, SpringParams::bouncy()),
+            custom_spring: Spring::new(initial_target, SpringParams::new(20.0, 0.4)),
+            custom_frequency: 20.0,
+            custom_damping: 0.4,
+            target_val: initial_target,
+            history_gentle: Vec::new(),
+            history_snappy: Vec::new(),
+            history_bouncy: Vec::new(),
+            history_custom: Vec::new(),
+        }
+    }
+}
+
+impl SpringDemoState {
+    pub fn set_target(&mut self, target: f32) {
+        self.target_val = target.clamp(0.0, 1.0);
+        self.gentle_spring.set_target(self.target_val);
+        self.snappy_spring.set_target(self.target_val);
+        self.bouncy_spring.set_target(self.target_val);
+        self.custom_spring.set_target(self.target_val);
+    }
+
+    pub fn apply_impulse(&mut self, velocity: f32) {
+        self.gentle_spring.velocity += velocity;
+        self.snappy_spring.velocity += velocity;
+        self.bouncy_spring.velocity += velocity;
+        self.custom_spring.velocity += velocity;
+    }
+
+    pub fn update(&mut self, dt: f32) {
+        self.custom_spring.params = SpringParams::new(self.custom_frequency, self.custom_damping);
+
+        self.gentle_spring.update(dt);
+        self.snappy_spring.update(dt);
+        self.bouncy_spring.update(dt);
+        self.custom_spring.update(dt);
+
+        // Record history trace for oscilloscope visualization (keep last 140 points)
+        self.history_gentle.push(self.gentle_spring.value());
+        self.history_snappy.push(self.snappy_spring.value());
+        self.history_bouncy.push(self.bouncy_spring.value());
+        self.history_custom.push(self.custom_spring.value());
+
+        if self.history_gentle.len() > 140 { self.history_gentle.remove(0); }
+        if self.history_snappy.len() > 140 { self.history_snappy.remove(0); }
+        if self.history_bouncy.len() > 140 { self.history_bouncy.remove(0); }
+        if self.history_custom.len() > 140 { self.history_custom.remove(0); }
+    }
+
+    pub fn is_animating(&self) -> bool {
+        !self.gentle_spring.is_settled()
+            || !self.snappy_spring.is_settled()
+            || !self.bouncy_spring.is_settled()
+            || !self.custom_spring.is_settled()
+    }
+}
+
+pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
+    let dt = ui.input(|i| i.stable_dt).min(0.05);
+    state.update(dt);
+
+    // Continuous motion repaint rule (CODING_RULES §4):
+    if state.is_animating() {
+        ui.ctx().request_repaint();
+    }
+
+    ui.horizontal(|ui| {
+        ui.colored_label(
+            Color32::from_rgb(137, 180, 250),
+            egui::RichText::new("⚡ spring-core Analytical Physics Playground").strong().size(16.0),
+        );
+        ui.label(
+            egui::RichText::new("• 100% framerate-independent closed-form ODE solver")
+                .size(12.0)
+                .color(Color32::from_rgb(166, 173, 200)),
+        );
+    });
+    ui.add_space(4.0);
+
+    // Control bar
+    ui.horizontal(|ui| {
+        ui.label("Quick Targets:");
+        if ui.button("0% (Left)").clicked() { state.set_target(0.0); }
+        if ui.button("25%").clicked() { state.set_target(0.25); }
+        if ui.button("50% (Center)").clicked() { state.set_target(0.5); }
+        if ui.button("75%").clicked() { state.set_target(0.75); }
+        if ui.button("100% (Right)").clicked() { state.set_target(1.0); }
+
+        ui.separator();
+        if ui.button("💥 Physical Impulse (+3.0 v0)").clicked() {
+            state.apply_impulse(3.0);
+        }
+        if ui.button("💥 Reverse Impulse (-3.0 v0)").clicked() {
+            state.apply_impulse(-3.0);
+        }
+    });
+
+    ui.add_space(6.0);
+
+    // 4 Tracks Comparison
+    let track_height = 42.0;
+    render_spring_track(
+        ui,
+        "🟣 Gentle Preset (ω0 = 14, ζ = 0.90)",
+        state.gentle_spring.value(),
+        state.gentle_spring.velocity(),
+        state.target_val,
+        Color32::from_rgb(203, 166, 247),
+        track_height,
+        |new_target| state.set_target(new_target),
+    );
+
+    ui.add_space(4.0);
+    render_spring_track(
+        ui,
+        "🟢 Snappy Preset (ω0 = 28, ζ = 0.85)",
+        state.snappy_spring.value(),
+        state.snappy_spring.velocity(),
+        state.target_val,
+        Color32::from_rgb(166, 227, 161),
+        track_height,
+        |new_target| state.set_target(new_target),
+    );
+
+    ui.add_space(4.0);
+    render_spring_track(
+        ui,
+        "🟠 Bouncy Preset (ω0 = 18, ζ = 0.50)",
+        state.bouncy_spring.value(),
+        state.bouncy_spring.velocity(),
+        state.target_val,
+        Color32::from_rgb(250, 179, 135),
+        track_height,
+        |new_target| state.set_target(new_target),
+    );
+
+    ui.add_space(4.0);
+    let regime_label = if state.custom_damping < 0.9999 {
+        "Underdamped (Oscillating)"
+    } else if state.custom_damping > 1.0001 {
+        "Overdamped (Sluggish)"
+    } else {
+        "Critically Damped"
+    };
+
+    render_spring_track(
+        ui,
+        &format!("🔵 Custom Spring (ω0 = {:.0}, ζ = {:.2}) — {}", state.custom_frequency, state.custom_damping, regime_label),
+        state.custom_spring.value(),
+        state.custom_spring.velocity(),
+        state.target_val,
+        Color32::from_rgb(137, 220, 235),
+        track_height,
+        |new_target| state.set_target(new_target),
+    );
+
+    ui.add_space(6.0);
+
+    // Tuning Sliders and Real-time Oscilloscope
+    ui.columns(2, |cols| {
+        cols[0].group(|ui| {
+            ui.label(egui::RichText::new("⚙️ Live Parameter Tuning").strong());
+            ui.add(egui::Slider::new(&mut state.custom_frequency, 2.0..=50.0).text("Frequency ω0 (rad/s)"));
+            ui.add(egui::Slider::new(&mut state.custom_damping, 0.05..=2.5).text("Damping Ratio ζ"));
+            ui.label(format!("Current Regime: {}", regime_label));
+            ui.label(format!("Status: {}", if state.is_animating() { "⚡ Active Motion (repainting)" } else { "✓ Settled" }));
+        });
+
+        cols[1].group(|ui| {
+            ui.label(egui::RichText::new("📈 Real-Time Trajectory Trace").strong());
+            render_oscilloscope(ui, state);
+        });
+    });
+}
+
+fn render_spring_track(
+    ui: &mut Ui,
+    title: &str,
+    current_val: f32,
+    velocity: f32,
+    target_val: f32,
+    accent: Color32,
+    height: f32,
+    mut on_click: impl FnMut(f32),
+) {
+    let available_w = ui.available_width();
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(available_w, height), Sense::click_and_drag());
+
+    if response.clicked() || response.dragged() {
+        if let Some(pos) = response.interact_pointer_pos() {
+            let pad = 24.0;
+            let track_w = rect.width() - pad * 2.0;
+            let frac = ((pos.x - (rect.min.x + pad)) / track_w).clamp(0.0, 1.0);
+            on_click(frac);
+        }
+    }
+
+    let painter = ui.painter();
+
+    // Track card background with intact rounded corners
+    painter.rect(
+        rect,
+        Rounding::same(6.0),
+        Color32::from_rgb(30, 32, 48),
+        Stroke::new(1.0, Color32::from_rgb(69, 71, 90)),
+    );
+
+    let pad = 24.0;
+    let track_min_x = rect.min.x + pad;
+    let track_max_x = rect.max.x - pad;
+    let track_w = track_max_x - track_min_x;
+    let track_y = rect.center().y + 4.0;
+
+    // Track rail
+    painter.line_segment(
+        [Pos2::new(track_min_x, track_y), Pos2::new(track_max_x, track_y)],
+        Stroke::new(3.0, Color32::from_rgb(49, 50, 68)),
+    );
+
+    // Target marker (dotted vertical pin)
+    let target_x = track_min_x + target_val * track_w;
+    painter.line_segment(
+        [Pos2::new(target_x, track_y - 10.0), Pos2::new(target_x, track_y + 10.0)],
+        Stroke::new(2.0, Color32::from_rgb(186, 194, 222)),
+    );
+
+    // Spring coil lines from left to current ball
+    let current_x = track_min_x + current_val.clamp(-0.2, 1.2) * track_w;
+    let coil_segments = 14;
+    let mut prev_pt = Pos2::new(track_min_x, track_y);
+    for i in 1..=coil_segments {
+        let frac = i as f32 / coil_segments as f32;
+        let x = track_min_x + (current_x - track_min_x) * frac;
+        let y_offset = if i % 2 == 1 { -4.0 } else { 4.0 };
+        let pt = Pos2::new(x, track_y + y_offset);
+        painter.line_segment([prev_pt, pt], Stroke::new(1.0, Color32::from_rgb(108, 112, 134)));
+        prev_pt = pt;
+    }
+    painter.line_segment([prev_pt, Pos2::new(current_x, track_y)], Stroke::new(1.0, Color32::from_rgb(108, 112, 134)));
+
+    // Animated ball head
+    painter.circle(
+        Pos2::new(current_x, track_y),
+        8.0,
+        accent,
+        Stroke::new(1.5, Color32::WHITE),
+    );
+
+    // Title and telemetry text
+    painter.text(
+        Pos2::new(rect.min.x + 10.0, rect.min.y + 10.0),
+        egui::Align2::LEFT_TOP,
+        title,
+        egui::FontId::proportional(12.0),
+        Color32::from_rgb(205, 214, 244),
+    );
+
+    let telemetry = format!("pos: {:.2} • vel: {:+.1}", current_val, velocity);
+    painter.text(
+        Pos2::new(rect.max.x - 10.0, rect.min.y + 10.0),
+        egui::Align2::RIGHT_TOP,
+        telemetry,
+        egui::FontId::monospace(10.5),
+        Color32::from_rgb(147, 153, 178),
+    );
+}
+
+fn render_oscilloscope(ui: &mut Ui, state: &SpringDemoState) {
+    let height = 74.0;
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::hover());
+    let painter = ui.painter();
+
+    painter.rect(
+        rect,
+        Rounding::same(4.0),
+        Color32::from_rgb(24, 24, 37),
+        Stroke::new(1.0, Color32::from_rgb(49, 50, 68)),
+    );
+
+    // Target baseline
+    let target_y = rect.max.y - (state.target_val * (rect.height() - 16.0) + 8.0);
+    painter.line_segment(
+        [Pos2::new(rect.min.x, target_y), Pos2::new(rect.max.x, target_y)],
+        Stroke::new(1.0, Color32::from_rgb(69, 71, 90)),
+    );
+
+    draw_trace(&painter, rect, &state.history_gentle, Color32::from_rgb(203, 166, 247));
+    draw_trace(&painter, rect, &state.history_snappy, Color32::from_rgb(166, 227, 161));
+    draw_trace(&painter, rect, &state.history_bouncy, Color32::from_rgb(250, 179, 135));
+    draw_trace(&painter, rect, &state.history_custom, Color32::from_rgb(137, 220, 235));
+}
+
+fn draw_trace(painter: &egui::Painter, rect: Rect, history: &[f32], color: Color32) {
+    if history.len() < 2 {
+        return;
+    }
+    let n = history.len();
+    let step_x = rect.width() / (n as f32 - 1.0);
+
+    for i in 0..n - 1 {
+        let x1 = rect.min.x + (i as f32) * step_x;
+        let y1 = rect.max.y - (history[i].clamp(-0.5, 1.5) * (rect.height() - 16.0) + 8.0);
+
+        let x2 = rect.min.x + ((i + 1) as f32) * step_x;
+        let y2 = rect.max.y - (history[i + 1].clamp(-0.5, 1.5) * (rect.height() - 16.0) + 8.0);
+
+        painter.line_segment(
+            [Pos2::new(x1, y1), Pos2::new(x2, y2)],
+            Stroke::new(1.5, color),
+        );
+    }
 }

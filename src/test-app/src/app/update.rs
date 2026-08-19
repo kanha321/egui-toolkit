@@ -7,6 +7,7 @@ impl eframe::App for TestAppState {
         // Dynamically enforce minimum window size based on active scene layout calculation
         let dynamic_min_size = match self.active_scene {
             ActiveScene::Layout => layout_demo::min_layout_size(),
+            ActiveScene::Spring => egui::Vec2::new(600.0, 420.0),
             _ => egui::Vec2::new(400.0, 200.0),
         };
         ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(dynamic_min_size));
@@ -25,7 +26,7 @@ impl eframe::App for TestAppState {
         egui::CentralPanel::default().show(ctx, |ui| {
             match self.active_scene {
                 ActiveScene::Layout => layout_demo::show(ui),
-                ActiveScene::Spring => spring_demo::show(ui),
+                ActiveScene::Spring => spring_demo::show(ui, &mut self.spring_demo),
                 ActiveScene::VimNav => vim_nav_demo::show(ui),
                 ActiveScene::NavStack => nav_stack_demo::show(ui),
                 ActiveScene::Theme => theme_demo::show(ui),
