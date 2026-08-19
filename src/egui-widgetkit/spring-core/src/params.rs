@@ -58,6 +58,14 @@ impl SpringParams {
         }
     }
 
+    /// Signature OpenRGB / Neovide cursor feel (`angular_frequency: 22.0`, `damping_ratio: 0.65`).
+    pub const fn openrgb() -> Self {
+        Self {
+            angular_frequency: 22.0,
+            damping_ratio: 0.65,
+        }
+    }
+
     /// Sets the angular frequency in radians per second.
     pub fn with_frequency(mut self, frequency: f32) -> Self {
         self.angular_frequency = frequency.max(0.001);

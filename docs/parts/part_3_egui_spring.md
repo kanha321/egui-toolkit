@@ -31,10 +31,10 @@ use spring_core::SpringParams;
 
 // 1. App state owns the highlight
 let mut highlight = SpringRect::new(egui::Rect::ZERO)
-    .with_fill(egui::Color32::from_rgba_unmultiplied(137, 180, 250, 40))
-    .with_stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(137, 180, 250)))
+    .with_fill(egui::Color32::from_rgba_unmultiplied(0, 255, 136, 40))
+    .with_stroke(egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 255, 136)))
     .with_rounding(8.0)
-    .with_params(SpringParams::snappy());
+    .with_params(SpringParams::openrgb());
 
 // 2. Set new target rect when an item is selected
 if let Some(selected_rect) = active_selection_rect {
@@ -65,5 +65,5 @@ When designing a **Settings / Highlight & Animation Page**, the following parame
 | `highlight.stroke_width` | Slider | `0.5 ..= 4.0` px | Border stroke thickness |
 | `highlight.corner_rounding` | Slider | `0.0 ..= 24.0` px | Bézier arc corner radius |
 | `highlight.smear_intensity` | Slider | `0.0 ..= 2.0` | Multiplier for leading corner stretch elasticity |
-| `highlight.preset` | ComboBox | `Gentle`, `Snappy`, `Bouncy` | Spring stiffness and damping preset |
+| `highlight.preset` | ComboBox | `Gentle`, `Snappy`, `Bouncy`, `OpenRGB`, `Custom` | Spring stiffness and damping preset |
 | `highlight.glow_effect` | Checkbox / Toggle | `true` / `false` | Enables dual-layer outer glow outline |

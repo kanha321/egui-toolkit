@@ -22,6 +22,7 @@
      - `SpringParams::gentle()` ($\omega_0 = 14.0, \zeta = 0.90$): Smooth, soft glide.
      - `SpringParams::snappy()` ($\omega_0 = 28.0, \zeta = 0.85$): Fast, crisp arrival with near-zero overshoot.
      - `SpringParams::bouncy()` ($\omega_0 = 18.0, \zeta = 0.50$): Elastic spring with visible bounce.
+     - `SpringParams::openrgb()` ($\omega_0 = 22.0, \zeta = 0.65$): Signature OpenRGB / Neovide cursor feel with lively responsiveness and elastic smear.
 
 4. **Two-Fold Settling Guarantee**:
    - `spring.is_settled()` validates **both** distance to target ($|x - x_{\text{target}}| < \text{settle\_dist}$) **and** velocity ($|v| < \text{settle\_vel}$).
@@ -35,7 +36,7 @@
 use spring_core::{Spring, SpringParams};
 
 // 1. App state owns the spring
-let mut spring = Spring::new(0.0, SpringParams::snappy());
+let mut spring = Spring::new(0.0, SpringParams::openrgb());
 
 // 2. Set new target upon user interaction
 spring.set_target(150.0);
@@ -61,7 +62,7 @@ When designing a **Settings / Animation & Physics Page**, the following paramete
 
 | Setting Key | UI Control | Range / Options | Description |
 |---|---|---|---|
-| `physics.preset` | ComboBox / Radio | `Gentle`, `Snappy`, `Bouncy`, `Custom` | Master animation feel preset |
+| `physics.preset` | ComboBox / Radio | `Gentle`, `Snappy`, `Bouncy`, `OpenRGB`, `Custom` | Master animation feel preset |
 | `physics.custom_frequency` | Slider | `2.0 ..= 50.0` rad/s ($\omega_0$) | Speed / stiffness of motion (higher = faster snap) |
 | `physics.custom_damping` | Slider | `0.05 ..= 2.50` ($\zeta$) | Damping factor ($<1.0$ bouncy, $=1.0$ critical, $>1.0$ overdamped) |
 | `physics.settle_distance` | DragValue / Scientific | `0.0001 ..= 0.01` px | Position tolerance threshold before halting animation |

@@ -6,13 +6,14 @@ use egui::{
 use egui_spring::SpringRect;
 use spring_core::{Spring, SpringParams};
 
-/// The 4 available spring animation presets.
+/// The 5 available spring animation presets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum HighlightPreset {
     Gentle,
     #[default]
     Snappy,
     Bouncy,
+    OpenRGB,
     Custom,
 }
 
@@ -21,6 +22,7 @@ pub struct SpringDemoState {
     pub gentle_spring: Spring,
     pub snappy_spring: Spring,
     pub bouncy_spring: Spring,
+    pub openrgb_spring: Spring,
     pub custom_spring: Spring,
     pub custom_frequency: f32,
     pub custom_damping: f32,
@@ -28,6 +30,7 @@ pub struct SpringDemoState {
     pub history_gentle: Vec<f32>,
     pub history_snappy: Vec<f32>,
     pub history_bouncy: Vec<f32>,
+    pub history_openrgb: Vec<f32>,
     pub history_custom: Vec<f32>,
     // 2D SpringRect elastic smear selection highlight demo
     pub selection_highlight: SpringRect,
@@ -42,6 +45,7 @@ impl Default for SpringDemoState {
             gentle_spring: Spring::new(initial_target, SpringParams::gentle()),
             snappy_spring: Spring::new(initial_target, SpringParams::snappy()),
             bouncy_spring: Spring::new(initial_target, SpringParams::bouncy()),
+            openrgb_spring: Spring::new(initial_target, SpringParams::openrgb()),
             custom_spring: Spring::new(initial_target, SpringParams::new(20.0, 0.4)),
             custom_frequency: 20.0,
             custom_damping: 0.4,
@@ -49,14 +53,15 @@ impl Default for SpringDemoState {
             history_gentle: Vec::new(),
             history_snappy: Vec::new(),
             history_bouncy: Vec::new(),
+            history_openrgb: Vec::new(),
             history_custom: Vec::new(),
             selection_highlight: SpringRect::new(Rect::ZERO)
-                .with_fill(Color32::from_rgba_unmultiplied(166, 227, 161, 40))
-                .with_stroke(Stroke::new(2.0, Color32::from_rgb(166, 227, 161)))
+                .with_fill(Color32::from_rgba_unmultiplied(0, 255, 136, 40))
+                .with_stroke(Stroke::new(2.0, Color32::from_rgb(0, 255, 136)))
                 .with_rounding(8.0)
-                .with_params(SpringParams::snappy()),
+                .with_params(SpringParams::openrgb()),
             selected_card: 0,
-            highlight_preset: HighlightPreset::Snappy,
+            highlight_preset: HighlightPreset::OpenRGB,
         }
     }
 }
@@ -67,6 +72,7 @@ impl SpringDemoState {
         self.gentle_spring.set_target(self.target_val);
         self.snappy_spring.set_target(self.target_val);
         self.bouncy_spring.set_target(self.target_val);
+        self.openrgb_spring.set_target(self.target_val);
         self.custom_spring.set_target(self.target_val);
     }
 
@@ -74,6 +80,7 @@ impl SpringDemoState {
         self.gentle_spring.velocity += velocity;
         self.snappy_spring.velocity += velocity;
         self.bouncy_spring.velocity += velocity;
+        self.openrgb_spring.velocity += velocity;
         self.custom_spring.velocity += velocity;
     }
 
@@ -85,6 +92,7 @@ impl SpringDemoState {
             HighlightPreset::Gentle => (SpringParams::gentle(), Color32::from_rgb(203, 166, 247)),
             HighlightPreset::Snappy => (SpringParams::snappy(), Color32::from_rgb(166, 227, 161)),
             HighlightPreset::Bouncy => (SpringParams::bouncy(), Color32::from_rgb(250, 179, 135)),
+            HighlightPreset::OpenRGB => (SpringParams::openrgb(), Color32::from_rgb(0, 255, 136)),
             HighlightPreset::Custom => (
                 SpringParams::new(self.custom_frequency, self.custom_damping),
                 Color32::from_rgb(137, 220, 235),
@@ -103,6 +111,7 @@ impl SpringDemoState {
         self.gentle_spring.update(dt);
         self.snappy_spring.update(dt);
         self.bouncy_spring.update(dt);
+        self.openrgb_spring.update(dt);
         self.custom_spring.update(dt);
 
         self.selection_highlight.update(dt);
@@ -111,11 +120,13 @@ impl SpringDemoState {
         self.history_gentle.push(self.gentle_spring.value());
         self.history_snappy.push(self.snappy_spring.value());
         self.history_bouncy.push(self.bouncy_spring.value());
+        self.history_openrgb.push(self.openrgb_spring.value());
         self.history_custom.push(self.custom_spring.value());
 
         if self.history_gentle.len() > 140 { self.history_gentle.remove(0); }
         if self.history_snappy.len() > 140 { self.history_snappy.remove(0); }
         if self.history_bouncy.len() > 140 { self.history_bouncy.remove(0); }
+        if self.history_openrgb.len() > 140 { self.history_openrgb.remove(0); }
         if self.history_custom.len() > 140 { self.history_custom.remove(0); }
     }
 
@@ -123,6 +134,7 @@ impl SpringDemoState {
         !self.gentle_spring.is_settled()
             || !self.snappy_spring.is_settled()
             || !self.bouncy_spring.is_settled()
+            || !self.openrgb_spring.is_settled()
             || !self.custom_spring.is_settled()
             || !self.selection_highlight.is_settled()
     }
@@ -170,8 +182,8 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
 
     ui.add_space(3.0);
 
-    // 4 Tracks Comparison
-    let track_height = 34.0;
+    // 5 Tracks Comparison
+    let track_height = 32.0;
     render_spring_track(
         ui,
         "🟣 Gentle Preset (ω0 = 14, ζ = 0.90)",
@@ -208,6 +220,18 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
     );
 
     ui.add_space(2.0);
+    render_spring_track(
+        ui,
+        "💚 OpenRGB / Neovide Preset (ω0 = 22, ζ = 0.65)",
+        state.openrgb_spring.value(),
+        state.openrgb_spring.velocity(),
+        state.target_val,
+        Color32::from_rgb(0, 255, 136),
+        track_height,
+        |new_target| state.set_target(new_target),
+    );
+
+    ui.add_space(2.0);
     let regime_label = if state.custom_damping < 0.9999 {
         "Underdamped"
     } else if state.custom_damping > 1.0001 {
@@ -227,20 +251,21 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
         |new_target| state.set_target(new_target),
     );
 
-    ui.add_space(5.0);
+    ui.add_space(4.0);
 
-    // Middle Section: 2D SpringRect Elastic Smear Demo with 4 Animation Presets Selector
+    // Middle Section: 2D SpringRect Elastic Smear Demo with 5 Animation Presets Selector
     ui.group(|ui| {
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("🎯 2D Elastic Smear Selection Highlight").strong());
             ui.separator();
-            ui.label("Active Animation Type:");
+            ui.label("Preset:");
             ui.selectable_value(&mut state.highlight_preset, HighlightPreset::Gentle, "🟣 Gentle");
             ui.selectable_value(&mut state.highlight_preset, HighlightPreset::Snappy, "🟢 Snappy");
             ui.selectable_value(&mut state.highlight_preset, HighlightPreset::Bouncy, "🟠 Bouncy");
+            ui.selectable_value(&mut state.highlight_preset, HighlightPreset::OpenRGB, "💚 OpenRGB");
             ui.selectable_value(&mut state.highlight_preset, HighlightPreset::Custom, "🔵 Custom");
         });
-        ui.add_space(4.0);
+        ui.add_space(3.0);
 
         let cards = [
             ("📁 Projects", "Workspaces & Skeletons"),
@@ -256,7 +281,7 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
 
         ui.horizontal(|ui| {
             for (idx, (title, subtitle)) in cards.iter().take(3).enumerate() {
-                let (rect, resp) = ui.allocate_exact_size(Vec2::new(card_w, 40.0), Sense::click());
+                let (rect, resp) = ui.allocate_exact_size(Vec2::new(card_w, 38.0), Sense::click());
                 if resp.clicked() {
                     state.selected_card = idx;
                 }
@@ -274,25 +299,25 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
                     rect.min + Vec2::new(10.0, 5.0),
                     egui::Align2::LEFT_TOP,
                     *title,
-                    egui::FontId::proportional(12.5),
+                    egui::FontId::proportional(12.0),
                     Color32::from_rgb(205, 214, 244),
                 );
                 ui.painter().text(
-                    rect.min + Vec2::new(10.0, 21.0),
+                    rect.min + Vec2::new(10.0, 20.0),
                     egui::Align2::LEFT_TOP,
                     *subtitle,
-                    egui::FontId::proportional(10.5),
+                    egui::FontId::proportional(10.0),
                     Color32::from_rgb(147, 153, 178),
                 );
             }
         });
 
-        ui.add_space(4.0);
+        ui.add_space(3.0);
 
         ui.horizontal(|ui| {
             for (idx, (title, subtitle)) in cards.iter().skip(3).enumerate() {
                 let real_idx = idx + 3;
-                let (rect, resp) = ui.allocate_exact_size(Vec2::new(card_w, 40.0), Sense::click());
+                let (rect, resp) = ui.allocate_exact_size(Vec2::new(card_w, 38.0), Sense::click());
                 if resp.clicked() {
                     state.selected_card = real_idx;
                 }
@@ -310,14 +335,14 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
                     rect.min + Vec2::new(10.0, 5.0),
                     egui::Align2::LEFT_TOP,
                     *title,
-                    egui::FontId::proportional(12.5),
+                    egui::FontId::proportional(12.0),
                     Color32::from_rgb(205, 214, 244),
                 );
                 ui.painter().text(
-                    rect.min + Vec2::new(10.0, 21.0),
+                    rect.min + Vec2::new(10.0, 20.0),
                     egui::Align2::LEFT_TOP,
                     *subtitle,
-                    egui::FontId::proportional(10.5),
+                    egui::FontId::proportional(10.0),
                     Color32::from_rgb(147, 153, 178),
                 );
             }
@@ -331,7 +356,7 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
         state.selection_highlight.paint(ui.painter());
     });
 
-    ui.add_space(5.0);
+    ui.add_space(4.0);
 
     // Tuning Sliders and Real-time Oscilloscope
     ui.columns(2, |cols| {
@@ -463,6 +488,7 @@ fn render_oscilloscope(ui: &mut Ui, state: &SpringDemoState) {
     draw_trace(&painter, rect, &state.history_gentle, Color32::from_rgb(203, 166, 247));
     draw_trace(&painter, rect, &state.history_snappy, Color32::from_rgb(166, 227, 161));
     draw_trace(&painter, rect, &state.history_bouncy, Color32::from_rgb(250, 179, 135));
+    draw_trace(&painter, rect, &state.history_openrgb, Color32::from_rgb(0, 255, 136));
     draw_trace(&painter, rect, &state.history_custom, Color32::from_rgb(137, 220, 235));
 }
 
