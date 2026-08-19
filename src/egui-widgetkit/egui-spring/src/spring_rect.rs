@@ -1,13 +1,13 @@
 //! Spring-animated highlight widget emitting pure `egui::Shape` primitives.
 
-use egui::{Color32, Painter, Pos2, Rect, Response, Sense, Shape, Stroke, Ui, Vec2};
+use egui::{Color32, Painter, Pos2, Rect, Response, Rounding, Sense, Shape, Stroke, Ui, Vec2};
 use spring_core::{Spring, SpringParams};
 
 use crate::bezier::{build_bezier_boundary, DEFAULT_ARC_SEGMENTS};
 use crate::corner_springs::CornerSprings;
 
 /// A spring-animated selection highlight rectangle with Bézier-rounded borders
-/// and flight-synchronized shape morphing (OpenRGB / Neovide design).
+/// and flight-synchronized shape morphing across regular and irregular geometric shapes.
 ///
 /// # State Ownership
 ///
@@ -23,12 +23,12 @@ pub struct SpringRect {
     pub fill_color: Color32,
     /// Stroke applied to the highlight border.
     pub stroke: Stroke,
-    /// Target corner rounding radius in pixels.
-    pub target_rounding: f32,
-    /// Starting rounding radius at beginning of flight.
-    pub start_rounding: f32,
-    /// Current interpolated rounding radius.
-    pub current_rounding: f32,
+    /// Target corner rounding per-corner (NW, NE, SE, SW).
+    pub target_rounding: Rounding,
+    /// Starting rounding per-corner at beginning of flight.
+    pub start_rounding: Rounding,
+    /// Current interpolated rounding per-corner.
+    pub current_rounding: Rounding,
     /// Flight start centroid position.
     pub start_center: Pos2,
     /// Flight target centroid position.
@@ -46,7 +46,7 @@ impl Default for SpringRect {
 impl SpringRect {
     /// Creates a new `SpringRect` initialized to `target_rect` with OpenRGB/Neovide defaults.
     pub fn new(target_rect: Rect) -> Self {
-        let default_rounding = 6.0;
+        let default_rounding = Rounding::same(6.0);
         Self {
             corners: CornerSprings::new(target_rect, 22.0, 0.65),
             alpha_spring: Spring::new(1.0, SpringParams::new(24.0, 0.75)),
@@ -80,11 +80,20 @@ impl SpringRect {
         self
     }
 
-    /// Sets the corner rounding radius.
+    /// Sets uniform corner rounding radius.
     pub fn with_rounding(mut self, rounding: f32) -> Self {
-        self.target_rounding = rounding.max(0.0);
-        self.current_rounding = rounding.max(0.0);
-        self.start_rounding = rounding.max(0.0);
+        let r = Rounding::same(rounding.max(0.0));
+        self.target_rounding = r;
+        self.current_rounding = r;
+        self.start_rounding = r;
+        self
+    }
+
+    /// Sets per-corner rounding for asymmetric / irregular shapes.
+    pub fn with_corner_rounding(mut self, rounding: Rounding) -> Self {
+        self.target_rounding = rounding;
+        self.current_rounding = rounding;
+        self.start_rounding = rounding;
         self
     }
 
@@ -96,19 +105,30 @@ impl SpringRect {
 
     /// Retargets the spring highlight to a new bounding rectangle.
     pub fn set_target(&mut self, target: Rect) {
-        self.set_target_with_rounding(target, self.target_rounding);
+        self.set_target_with_corner_rounding(target, self.target_rounding);
     }
 
-    /// Retargets the spring highlight with a specific target shape rounding for morphing.
+    /// Retargets the spring highlight with uniform target rounding for morphing.
     pub fn set_target_with_rounding(&mut self, target: Rect, rounding: f32) {
+        self.set_target_with_corner_rounding(target, Rounding::same(rounding));
+    }
+
+    /// Retargets the spring highlight with asymmetric per-corner rounding for morphing.
+    pub fn set_target_with_corner_rounding(&mut self, target: Rect, rounding: Rounding) {
         let padded = target.expand(self.padding);
         let new_target_center = padded.center();
 
-        if (new_target_center - self.target_center).length() > 1.0 || (rounding - self.target_rounding).abs() > 0.1 {
+        let center_delta = (new_target_center - self.target_center).length();
+        let rounding_delta = (rounding.nw - self.target_rounding.nw).abs()
+            + (rounding.ne - self.target_rounding.ne).abs()
+            + (rounding.se - self.target_rounding.se).abs()
+            + (rounding.sw - self.target_rounding.sw).abs();
+
+        if center_delta > 1.0 || rounding_delta > 0.1 {
             self.start_center = self.corners.center();
             self.start_rounding = self.current_rounding;
             self.target_center = new_target_center;
-            self.target_rounding = rounding.max(0.0);
+            self.target_rounding = rounding;
         }
 
         self.corners.target_rect = padded;
@@ -137,15 +157,19 @@ impl SpringRect {
         self.corners.update(padded_target, dt);
         self.alpha_spring.update(dt);
 
-        // Morph rounding smoothly in direct proportion to spatial flight progress
+        // Morph rounding per-corner smoothly in direct proportion to spatial flight progress
         let total_dist = (self.target_center - self.start_center).length();
         if total_dist > 2.0 {
             let current_dist = (self.target_center - self.corners.center()).length();
             let raw_progress = (1.0 - (current_dist / total_dist)).clamp(0.0, 1.0);
             // Hermite smoothstep for natural organic curve interpolation
             let smooth_progress = raw_progress * raw_progress * (3.0 - 2.0 * raw_progress);
-            self.current_rounding = self.start_rounding
-                + (self.target_rounding - self.start_rounding) * smooth_progress;
+            self.current_rounding = Rounding {
+                nw: self.start_rounding.nw + (self.target_rounding.nw - self.start_rounding.nw) * smooth_progress,
+                ne: self.start_rounding.ne + (self.target_rounding.ne - self.start_rounding.ne) * smooth_progress,
+                se: self.start_rounding.se + (self.target_rounding.se - self.start_rounding.se) * smooth_progress,
+                sw: self.start_rounding.sw + (self.target_rounding.sw - self.start_rounding.sw) * smooth_progress,
+            };
         } else {
             self.current_rounding = self.target_rounding;
         }

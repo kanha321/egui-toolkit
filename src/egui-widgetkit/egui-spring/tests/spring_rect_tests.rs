@@ -1,4 +1,4 @@
-use egui::{Pos2, Rect};
+use egui::{Pos2, Rect, Rounding};
 use egui_spring::{build_bezier_boundary, CornerSprings, SpringRect};
 
 #[test]
@@ -32,7 +32,7 @@ fn test_bezier_boundary_generation() {
         Pos2::new(0.0, 50.0),
     ];
 
-    let points = build_bezier_boundary(&corners, 8.0, 8);
+    let points = build_bezier_boundary(&corners, Rounding::same(8.0), 8);
     // 4 corners * 9 points per corner = 36 points
     assert_eq!(points.len(), 36);
 
@@ -41,6 +41,24 @@ fn test_bezier_boundary_generation() {
         assert!(!pt.y.is_nan());
         assert!(pt.x >= -0.01 && pt.x <= 100.01);
         assert!(pt.y >= -0.01 && pt.y <= 50.01);
+    }
+}
+
+#[test]
+fn test_bezier_asymmetric_rounding() {
+    let corners = [
+        Pos2::new(0.0, 0.0),
+        Pos2::new(100.0, 0.0),
+        Pos2::new(100.0, 50.0),
+        Pos2::new(0.0, 50.0),
+    ];
+
+    let asymmetric = Rounding { nw: 20.0, ne: 0.0, se: 20.0, sw: 0.0 };
+    let points = build_bezier_boundary(&corners, asymmetric, 8);
+    assert!(points.len() > 4);
+    for pt in &points {
+        assert!(!pt.x.is_nan());
+        assert!(!pt.y.is_nan());
     }
 }
 

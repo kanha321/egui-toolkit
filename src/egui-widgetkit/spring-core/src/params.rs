@@ -21,7 +21,10 @@ pub struct SpringParams {
 
 impl Default for SpringParams {
     fn default() -> Self {
-        Self::snappy()
+        Self {
+            angular_frequency: 20.0,
+            damping_ratio: 0.5,
+        }
     }
 }
 
@@ -34,34 +37,34 @@ impl SpringParams {
         }
     }
 
-    /// Smooth, silky glide with subtle damping (`angular_frequency: 24.0`, `damping_ratio: 0.88`).
+    /// Smooth, silky glide with subtle damping (`angular_frequency: 18.0`, `damping_ratio: 0.90`).
     pub const fn gentle() -> Self {
         Self {
-            angular_frequency: 24.0,
-            damping_ratio: 0.88,
+            angular_frequency: 18.0,
+            damping_ratio: 0.90,
         }
     }
 
-    /// Razor-sharp, instantaneous lock-in with near-critical damping (`angular_frequency: 38.0`, `damping_ratio: 0.82`).
+    /// Crisp, responsive response (`angular_frequency: 32.0`, `damping_ratio: 0.85`).
     pub const fn snappy() -> Self {
         Self {
-            angular_frequency: 38.0,
-            damping_ratio: 0.82,
+            angular_frequency: 32.0,
+            damping_ratio: 0.85,
         }
     }
 
-    /// Fast, lively elastic spring with energetic bounce (`angular_frequency: 28.0`, `damping_ratio: 0.48`).
+    /// Fast, lively elastic spring with energetic bounce (`angular_frequency: 20.0`, `damping_ratio: 0.50`).
     pub const fn bouncy() -> Self {
         Self {
-            angular_frequency: 28.0,
-            damping_ratio: 0.48,
+            angular_frequency: 20.0,
+            damping_ratio: 0.50,
         }
     }
 
-    /// Signature OpenRGB / Neovide cursor feel (`angular_frequency: 32.0`, `damping_ratio: 0.65`).
+    /// Signature OpenRGB / Neovide cursor feel (`angular_frequency: 22.0`, `damping_ratio: 0.65`).
     pub const fn openrgb() -> Self {
         Self {
-            angular_frequency: 32.0,
+            angular_frequency: 22.0,
             damping_ratio: 0.65,
         }
     }

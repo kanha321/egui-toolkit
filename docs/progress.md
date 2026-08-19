@@ -11,11 +11,11 @@ This document tracks implementation progress across all parts and subparts defin
 | **Part 0** | Workspace Scaffolding (All 6 Library Crates + App) | ✅ Completed | Root workspace configured; `cargo check --workspace` passes cleanly |
 | **Part 1** | `egui-layout` (Constraint Solver & Spacing Engine) | ✅ Completed | Constraint solver + `compute_min_length` implemented; 8 unit tests + 2 doctests passed |
 | **Part 2** | `spring-core` (Pure Math ODE Solver) | ✅ Completed | Analytical closed-form solver; 8 unit tests + 1 doctest passed; zero egui dep verified |
-| **Part 3** | `egui-spring` (SpringRect & Bézier Smear) | ✅ Completed | 4-corner independent springs, Bézier smear geometry, Shape emission; 3 unit tests passed |
+| **Part 3** | `egui-spring` (SpringRect & Bézier Smear) | ✅ Completed | 4-corner independent springs, per-corner asymmetric Bézier smear, Shape emission; 4 unit tests passed |
 | **Part 4** | `egui-vim-nav` (Intra-Screen Focus Graph) | ⬜ Pending | `grid_navigation` example |
 | **Part 5** | `egui-themes` (Token-Based Theming & Live Preview) | ⬜ Pending | `theme_switcher` example |
 | **Part 6** | `egui-nav-stack` (Navigation 3 Screen Back-Stack) | ⬜ Pending | `stack_push_pop_replace` tests + `stack_navigation` example |
-| **Part 7** | `test-app` (Multi-Crate Integration & Showcase App) | ⬜ Pending | Isolated scenes + `combined_demo` |
+| **Part 7** | `test-app` (Multi-Crate Integration & Showcase App) | 🟡 In Progress | Isolated scenes (Layout, Spring) + responsive `egui-layout` integration |
 
 ---
 
@@ -56,7 +56,7 @@ This document tracks implementation progress across all parts and subparts defin
 - [x] `src/egui-widgetkit/spring-core/Cargo.toml` (zero `egui` dependency)
 - [x] `src/egui-widgetkit/spring-core/README.md`
 - [x] `src/egui-widgetkit/spring-core/src/lib.rs`
-- [x] **2.1** `params.rs` — `SpringParams` value type + presets (`gentle`, `snappy`, `bouncy`)
+- [x] **2.1** `params.rs` — `SpringParams` value type + presets (`gentle`, `snappy`, `bouncy`, `openrgb`, `default`: $\omega_0 = 20.0, \zeta = 0.50$)
 - [x] **2.2** `solver.rs` — Closed-form step functions (underdamped, critically damped with $\epsilon$-band, overdamped)
 - [x] **2.3** `spring.rs` — `Spring` state struct with `.update(dt)` and `.is_settled()` checking position & velocity
 - [x] **2.4** Tests:
@@ -71,10 +71,10 @@ This document tracks implementation progress across all parts and subparts defin
 - [x] `src/egui-widgetkit/egui-spring/README.md`
 - [x] `src/egui-widgetkit/egui-spring/src/lib.rs`
 - [x] **3.1** `corner_springs.rs` — 4 independent corner `Spring` instances with direction-aware stretch & logarithmic damping
-- [x] **3.2** `bezier.rs` — Bézier-rounded border geometry ($\kappa = \frac{4}{3}(\sqrt{2} - 1)$) with intact corner bounds
-- [x] **3.3** `spring_rect.rs` — `SpringRect` widget (`.show(&mut self, ui) -> Response`, `request_repaint()` while unsettled)
+- [x] **3.2** `bezier.rs` — Bézier-rounded border geometry ($\kappa = \frac{4}{3}(\sqrt{2} - 1)$) with per-corner asymmetric roundings (`egui::Rounding { nw, ne, se, sw }`)
+- [x] **3.3** `spring_rect.rs` — `SpringRect` widget (`.show(&mut self, ui) -> Response`, `request_repaint()` while unsettled, flight smoothstep morphing, target padding)
 - [x] **3.4** Tests & Example:
-  - [x] `tests/spring_rect_tests.rs` (3 unit tests passed)
+  - [x] `tests/spring_rect_tests.rs` (4 unit tests passed including asymmetric rounding)
   - [x] `examples/selection_highlight.rs` (compiled & verified)
 
 ---
@@ -121,11 +121,11 @@ This document tracks implementation progress across all parts and subparts defin
 
 ### Part 7 — `test-app` (Multi-Crate Integration & Showcase App)
 - [ ] `src/test-app/Cargo.toml` (path-depends on all 6 `egui-widgetkit/*` crates)
-- [ ] **7.1** `src/test-app/src/main.rs` (minimal bootstrap script with windows subsystem and dynamic min_inner_size)
-- [ ] **7.2** `src/test-app/src/app.rs` & `app/` (`state.rs`, `update.rs`)
+- [x] **7.1** `src/test-app/src/main.rs` (windows subsystem, JetBrainsMono Nerd Font, dynamic min inner size)
+- [x] **7.2** `src/test-app/src/app.rs` & `app/` (`state.rs`, `update.rs`)
 - [ ] **7.3** Isolated demo scenes in `scenes/`:
   - [x] `scenes/layout_demo.rs` (exercises `egui-layout` with dynamic min size & rounded corners)
-  - [x] `scenes/spring_demo.rs` (exercises `spring-core` + `egui-spring`)
+  - [x] `scenes/spring_demo.rs` (exercises `spring-core` + `egui-spring` with `egui-layout` nested splits)
   - [ ] `scenes/vim_nav_demo.rs` (exercises `egui-vim-nav`)
   - [ ] `scenes/nav_stack_demo.rs` (exercises `egui-nav-stack`)
   - [ ] `scenes/theme_demo.rs` (exercises `egui-themes`)
@@ -137,4 +137,4 @@ This document tracks implementation progress across all parts and subparts defin
 - **Part 0 Completed**: Root virtual workspace `Cargo.toml` configured with `[workspace.dependencies]` pinning `egui = "0.27"`, git initialized with `.gitignore`, full directory skeletons built under `src/egui-widgetkit/` (all 6 crates) and `src/test-app/`, verified with `cargo check --workspace` (0 warnings).
 - **Part 1 Completed & Hardened**: Upgraded `egui-layout` to a constraint-aware layout solver supporting `Size::Fraction`, `Size::Exact`, `Size::Remainder`, `.section_min()`, and `.section_fixed()`. Added `compute_min_length()` API and configured `test-app` dynamic window min inner size with corner rounding protection. 10/10 tests passing.
 - **Part 2 Completed & Verified**: Built `spring-core` pure math analytical closed-form ODE solver covering underdamped, critically damped ($\epsilon$-band snapped), and overdamped regimes with `SpringParams` presets and framerate-independent step invariance. 8 unit tests + 1 doctest passed; confirmed zero `egui` dependency via `cargo tree -p spring-core`.
-- **Part 3 Completed & Verified**: Built `egui-spring` with `CornerSprings` (4 independent 2D spring corners with travel-alignment stretch and logarithmic damping), `build_bezier_boundary` ($\kappa = 0.55228$), and `SpringRect` emitting pure `egui::Shape` primitives with continuous motion repaint. 3 unit tests and standalone example verified.
+- **Part 3 Completed & Verified**: Built `egui-spring` with `CornerSprings` (4 independent 2D spring corners with travel-alignment stretch and logarithmic damping), per-corner asymmetric Bézier curvature, and `SpringRect` emitting pure `egui::Shape` primitives with continuous motion repaint. Tested with 8 irregular shape components and integrated with `egui-layout` nested splits. 4 unit tests and standalone example verified.
