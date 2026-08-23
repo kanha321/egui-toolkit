@@ -984,6 +984,7 @@ dependencies = [
 name = "egui-nav-stack"
 version = "0.1.0"
 dependencies = [
+ "eframe",
  "egui",
  "egui-spring",
 ]
@@ -994,6 +995,7 @@ version = "0.1.0"
 dependencies = [
  "eframe",
  "egui",
+ "egui-themes",
  "spring-core",
 ]
 
@@ -1001,6 +1003,7 @@ dependencies = [
 name = "egui-themes"
 version = "0.1.0"
 dependencies = [
+ "eframe",
  "egui",
 ]
 

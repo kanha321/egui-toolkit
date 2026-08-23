@@ -29,7 +29,9 @@
 pub mod section;
 pub mod size;
 pub mod split;
+pub mod style;
 
 pub use section::Section;
 pub use size::Size;
 pub use split::Split;
+pub use style::SplitStyle;

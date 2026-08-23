@@ -1,11 +1,12 @@
-use egui::{Color32, Stroke, Ui, Vec2};
-use egui_layout::{Section, Split};
+use egui::Ui;
+use egui_layout::{Section, Split, SplitStyle};
+use egui_themes::ThemePalette;
 
 /// Inter-section spacing in logical points.
 const SECTION_SPACING: f32 = 6.0;
 
 /// Dynamically calculates the minimum window dimensions required to satisfy all nested section constraints.
-pub fn min_layout_size() -> Vec2 {
+pub fn min_layout_size() -> egui::Vec2 {
     // Automatically computed using the declarative 2D constraint tree
     let inner_workspace = Split::horizontal()
         .spacing(SECTION_SPACING)
@@ -23,12 +24,18 @@ pub fn min_layout_size() -> Vec2 {
         .add_section(Section::remainder().min_size_2d(right_area.min_width(), right_area.min_height()));
 
     let min_bounds = full_layout.min_size();
-    Vec2::new(min_bounds.x + 24.0, min_bounds.y + 60.0)
+    egui::Vec2::new(min_bounds.x + 24.0, min_bounds.y + 60.0)
 }
 
-pub fn show(ui: &mut Ui) {
+pub fn show(ui: &mut Ui, palette: &ThemePalette) {
+    // Global style for all sections — developers configure once, all cards inherit
+    let style = SplitStyle::default()
+        .with_spacing(SECTION_SPACING)
+        .with_card_rounding(10.0)
+        .with_card_padding(10.0);
+
     Split::horizontal()
-        .spacing(SECTION_SPACING)
+        .style(style.clone())
         // Section 1: Navigation / Explorer (Left column)
         .add_section(
             Section::fraction(0.24)
@@ -36,10 +43,7 @@ pub fn show(ui: &mut Ui) {
                 .card()
                 .title("📁 Project Explorer")
                 .subtitle("Section 1 • Left (24% min 150pt)")
-                .title_color(Color32::from_rgb(137, 180, 250))
-                .bg(Color32::from_rgb(30, 32, 48))
-                .stroke(Stroke::new(1.0, Color32::from_rgb(69, 71, 90)))
-                .padding(10.0)
+                .title_color(palette.info)
                 .content(|ui| {
                     ui.separator();
                     ui.label("📁 src/");
@@ -53,7 +57,7 @@ pub fn show(ui: &mut Ui) {
         .add_section(
             Section::remainder().content(|ui| {
                 Split::vertical()
-                    .spacing(SECTION_SPACING)
+                    .style(style.clone())
                     // Section 2: Top Command Ribbon (Fixed 48pt height)
                     .add_section(
                         Section::fixed(48.0)
@@ -61,10 +65,7 @@ pub fn show(ui: &mut Ui) {
                             .card()
                             .title("⚡ Command Ribbon")
                             .subtitle("Section 2 • Top (Fixed 48pt)")
-                            .title_color(Color32::from_rgb(166, 227, 161))
-                            .bg(Color32::from_rgb(36, 39, 58))
-                            .stroke(Stroke::new(1.0, Color32::from_rgb(69, 71, 90)))
-                            .padding(8.0)
+                            .title_color(palette.success)
                             .content(|ui| {
                                 ui.horizontal(|ui| {
                                     if ui.button("▶ Run").clicked() {}
@@ -77,7 +78,7 @@ pub fn show(ui: &mut Ui) {
                     .add_section(
                         Section::remainder().content(|ui| {
                             Split::horizontal()
-                                .spacing(SECTION_SPACING)
+                                .style(style.clone())
                                 // Section 3: Central Canvas / Viewport (Flexible remainder)
                                 .add_section(
                                     Section::remainder()
@@ -85,10 +86,7 @@ pub fn show(ui: &mut Ui) {
                                         .card()
                                         .title("🎨 Design Canvas / Viewport")
                                         .subtitle("Section 3 • Center (Flexible Remainder)")
-                                        .title_color(Color32::from_rgb(203, 166, 247))
-                                        .bg(Color32::from_rgb(24, 25, 38))
-                                        .stroke(Stroke::new(1.0, Color32::from_rgb(69, 71, 90)))
-                                        .padding(10.0)
+                                        .title_color(palette.accent)
                                         .content(|ui| {
                                             ui.separator();
                                             ui.label("Interactive visual canvas area.");
@@ -102,10 +100,7 @@ pub fn show(ui: &mut Ui) {
                                         .card()
                                         .title("⚙️ Property Inspector")
                                         .subtitle("Section 4 • Right (35% min 160pt)")
-                                        .title_color(Color32::from_rgb(249, 226, 175))
-                                        .bg(Color32::from_rgb(32, 34, 52))
-                                        .stroke(Stroke::new(1.0, Color32::from_rgb(69, 71, 90)))
-                                        .padding(10.0)
+                                        .title_color(palette.warning)
                                         .content(|ui| {
                                             ui.separator();
                                             ui.label("Width constraint: 35% flex");

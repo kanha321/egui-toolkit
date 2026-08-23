@@ -13,9 +13,9 @@ This document tracks implementation progress across all parts and subparts defin
 | **Part 2** | `spring-core` (Pure Math ODE Solver) | ✅ Completed | Analytical closed-form solver; 8 unit tests + 1 doctest passed; zero egui dep verified |
 | **Part 3** | `egui-spring` (SpringRect & Bézier Smear) | ✅ Completed | 4-corner independent springs, per-corner asymmetric Bézier smear, Shape emission; 4 unit tests passed |
 | **Part 4** | `egui-vim-nav` (Intra-Screen Focus Graph) | ✅ Completed | Generic `FocusGraph<T>` + `Navigator<T>` + `VimKeyHandler`; 15 unit tests + 2 doctests passed; `grid_navigation` example |
-| **Part 5** | `egui-themes` (Token-Based Theming & Live Preview) | ⬜ Pending | `theme_switcher` example |
-| **Part 6** | `egui-nav-stack` (Navigation 3 Screen Back-Stack) | ⬜ Pending | `stack_push_pop_replace` tests + `stack_navigation` example |
-| **Part 7** | `test-app` (Multi-Crate Integration & Showcase App) | 🟡 In Progress | Isolated scenes (Layout, Spring) + responsive `egui-layout` integration |
+| **Part 5** | `egui-themes` (Token-Based Theming & Live Preview) | ✅ Completed | 12 presets, token system, exponential lerp morphing, egui visuals sync; 5 unit tests + 1 doctest passed; `theme_switcher` example |
+| **Part 6** | `egui-nav-stack` (Navigation 3 Screen Back-Stack) | ✅ Completed | `stack_push_pop_replace` (9 tests) + `stack_navigation` example + 4 doctests passed |
+| **Part 7** | `test-app` (Multi-Crate Integration & Showcase App) | 🟡 In Progress | Isolated scenes (Layout, Spring, VimNav, NavStack, Theme) + responsive `egui-layout` integration |
 
 ---
 
@@ -102,42 +102,50 @@ This document tracks implementation progress across all parts and subparts defin
 ---
 
 ### Part 5 — `egui-themes`
-- [ ] `src/egui-widgetkit/egui-themes/Cargo.toml`
-- [ ] `src/egui-widgetkit/egui-themes/README.md`
-- [ ] `src/egui-widgetkit/egui-themes/src/lib.rs`
-- [ ] **5.1** `token.rs` — Extensible `ThemeToken` slot definitions
-- [ ] **5.2** `palette.rs` — Curated palettes without global/static state
-- [ ] **5.3** `switcher.rs` — Active palette state & `.set(palette)` applying to `ctx.style_mut()`
-- [ ] **5.4** `preview.rs` — Live preview panel widget
-- [ ] **5.5** Example:
-  - [ ] `examples/theme_switcher.rs`
+- [x] `src/egui-widgetkit/egui-themes/Cargo.toml` (`egui` only dep, `eframe` dev-dep)
+- [x] `src/egui-widgetkit/egui-themes/README.md`
+- [x] `src/egui-widgetkit/egui-themes/src/lib.rs` (strict state ownership docs, clean re-exports)
+- [x] **5.1** `token.rs` — Extensible `ThemeToken` slot definitions (Backgrounds, Surfaces, Overlays, Typography, Semantic)
+- [x] **5.2** `palette.rs` — `ThemePalette` single source of truth + 12 curated `ThemePreset` themes + smooth exponential lerp with finite convergence
+- [x] **5.3** `switcher.rs` — `ThemeState` manager with `.update(dt, ctx)` continuous repaint & `.apply_to_ctx(ctx)` native egui visuals sync
+- [x] **5.4** `preview.rs` — `ThemePreview` live interactive mock component preview widget
+- [x] **5.5** `gallery.rs` — `ThemeGallery` responsive swatch gallery card grid
+- [x] **5.6** Tests & Example:
+  - [x] `tests/theme_tests.rs` (5 unit tests: 12 presets construction, token mutation, lerp convergence, state lifecycle, egui visuals sync)
+  - [x] `examples/theme_switcher.rs` (standalone eframe preview demo)
+- [x] **5.7** `test-app` scene: `scenes/theme_demo.rs` (exercises `egui-themes` with live preview & semantic token tweaker)
+- [x] Verified: `cargo tree -p egui-themes --depth 1` confirms zero dependencies beyond `egui`
+- [x] Verified: `cargo test --workspace --all-features` passes (72/72 tests across workspace)
 
 ---
 
 ### Part 6 — `egui-nav-stack` (Navigation 3 Screen Back-Stack)
-- [ ] `src/egui-widgetkit/egui-nav-stack/Cargo.toml` (`optional = true` for `egui-spring`)
-- [ ] `src/egui-widgetkit/egui-nav-stack/README.md`
-- [ ] `src/egui-widgetkit/egui-nav-stack/src/lib.rs`
-- [ ] **6.1** `stack.rs` — `NavStack<K>` (`push`, `pop`, `replace_top`, `pop_to(predicate)`, `top`)
-- [ ] **6.2** Entry resolution (inline closure in `display.rs`)
-- [ ] **6.3** `display.rs` — `NavDisplay<K>` widget returning `Option<NavAction<K>>` requests
-- [ ] **6.4** `transition.rs` — `#[cfg(feature = "animated-transitions")]` spring push/pop transition
-- [ ] **6.5** Tests & Example:
-  - [ ] `tests/stack_push_pop_replace.rs` (plain data assertions)
-  - [ ] `examples/stack_navigation.rs`
+- [x] `src/egui-widgetkit/egui-nav-stack/Cargo.toml` (`optional = true` for `egui-spring`, dev-dependency on `eframe`)
+- [x] `src/egui-widgetkit/egui-nav-stack/README.md`
+- [x] `src/egui-widgetkit/egui-nav-stack/src/lib.rs` (state ownership contract docs, clean re-exports)
+- [x] **6.1** `stack.rs` — `NavStack<K>` (`new(root)`, `empty()`, `push`, `pop`, `go_back`, `go_forward`, `replace_top`, `pop_to`, `pop_to_root`, `apply`, `top`, `top_mut`, `iter`, `entries`, undo/redo forward stack)
+- [x] **6.2** Entry resolution (inline closure in `display.rs`)
+- [x] **6.3** `display.rs` — `NavDisplay<K>` widget returning `NavResponse<K>` holding `Option<NavAction<K>>` requests + `.empty_fallback(...)` + mouse thumb button 4/5 listening
+- [x] **6.4** `transition.rs` — `#[cfg(feature = "animated-transitions")]` `NavTransition<K: Clone>` with fresh `Spring` instances, directional parallax slide, shrink, fade, and pop overshoot
+- [x] **6.5** Tests & Example:
+  - [x] `tests/stack_push_pop_replace.rs` (9 unit tests covering all stack operations, undo/redo history, and branching resets)
+  - [x] `examples/stack_navigation.rs` (minimal standalone 3-screen sanity check)
+- [x] Verified: `cargo tree -p egui-nav-stack --depth 1` confirms zero dependencies beyond `egui` by default
+- [x] Verified: `cargo tree -p egui-nav-stack --features animated-transitions --depth 1` confirms `egui-spring` cleanly included when opt-in
+- [x] Verified: `cargo test --workspace --all-features` passes (72/72 tests across workspace)
 
 ---
 
 ### Part 7 — `test-app` (Multi-Crate Integration & Showcase App)
-- [ ] `src/test-app/Cargo.toml` (path-depends on all 6 `egui-widgetkit/*` crates)
+- [x] `src/test-app/Cargo.toml` (path-depends on all 6 `egui-widgetkit/*` crates)
 - [x] **7.1** `src/test-app/src/main.rs` (windows subsystem, JetBrainsMono Nerd Font, dynamic min inner size)
 - [x] **7.2** `src/test-app/src/app.rs` & `app/` (`state.rs`, `update.rs`)
 - [ ] **7.3** Isolated demo scenes in `scenes/`:
   - [x] `scenes/layout_demo.rs` (exercises `egui-layout` with dynamic min size & rounded corners)
   - [x] `scenes/spring_demo.rs` (exercises `spring-core` + `egui-spring` with `egui-layout` nested splits)
-  - [ ] `scenes/vim_nav_demo.rs` (exercises `egui-vim-nav`)
-  - [ ] `scenes/nav_stack_demo.rs` (exercises `egui-nav-stack`)
-  - [ ] `scenes/theme_demo.rs` (exercises `egui-themes`)
+  - [x] `scenes/vim_nav_demo.rs` (exercises `egui-vim-nav` with unified 2-tier highlights)
+  - [x] `scenes/nav_stack_demo.rs` (exercises `egui-nav-stack` with forward/backward data passing, breadcrumb trail, and stack inspector)
+  - [x] `scenes/theme_demo.rs` (exercises `egui-themes` with live preview & semantic token tweaker)
 - [ ] **7.4** `scenes/combined_demo.rs` (Full integrated multi-crate showcase: layout + spring highlight + nav-stack + themes + vim nav)
 
 ---
@@ -148,3 +156,5 @@ This document tracks implementation progress across all parts and subparts defin
 - **Part 2 Completed & Verified**: Built `spring-core` pure math analytical closed-form ODE solver covering underdamped, critically damped ($\epsilon$-band snapped), and overdamped regimes with `SpringParams` presets and framerate-independent step invariance. 8 unit tests + 1 doctest passed; confirmed zero `egui` dependency via `cargo tree -p spring-core`.
 - **Part 3 Completed & Verified**: Built `egui-spring` with `CornerSprings` (4 independent 2D spring corners with travel-alignment stretch and logarithmic damping), per-corner asymmetric Bézier curvature, and `SpringRect` emitting pure `egui::Shape` primitives with continuous motion repaint. Tested with 8 irregular shape components and integrated with `egui-layout` nested splits. 4 unit tests and standalone example verified.
 - **Part 4 Completed & Verified**: Built `egui-vim-nav` with generic `FocusGraph<T>` (topology-agnostic directional neighbor graph with bidirectional `connect_horizontal/vertical/grid` and one-way `connect_directed`), `Navigator<T>` (cursor with `FocusWrap::Clamp` and graceful missing-node recovery — zero panics), `VimKeyHandler` (HJKL + arrows + tab with `ctx.wants_keyboard_input()` text input guard), and `FocusRegion` (immediate-mode per-frame rendering helper with click-to-focus). All types disambiguated from `egui-nav-stack` naming (`VimKeyHandler`, `FocusRegion`, `FocusEvent`). 15 unit tests + 2 doctests passed; `cargo tree -p egui-vim-nav --depth 1` confirms `egui`-only dependency; standalone `grid_navigation` example and isolated `vim_nav_demo.rs` test-app scene verified.
+- **Part 5 Completed & Verified**: Built `egui-themes` single source of truth theming system. Semantic `ThemeToken` system (19 slots), 12 curated `ThemePreset` palettes, smooth exponential lerp morphing with integer step convergence, `ThemeState` manager synchronizing palette tokens directly to `egui::Visuals`, `ThemePreview` live animated mock application component, and `ThemeGallery` responsive card grid with bottom designer color strips. 5 unit tests + 1 doctest passed; confirmed zero dependencies beyond `egui`; standalone `theme_switcher` example and `theme_demo.rs` scene verified.
+- **Part 6 Completed & Verified**: Built `egui-nav-stack` modeled on the Android Navigation 3 philosophy and browser undo/redo history. Back-stack and forward-stack are app-owned values `NavStack<K>`, rendering is handled via immutable read in `NavDisplay<K>`, and safe post-render mutations are applied via `NavAction<K>` and `NavResponse<K>` with zero borrow conflicts. Implemented feature-gated `NavTransition<K: Clone>` with spring-animated directional parallax slide, shrink, fade, and pop overshoot up to ~110%, hardware mouse thumb buttons (4 & 5) listening, forward args-in-the-key and backward hoisted state data passing, and clickable breadcrumb navigation. 9 unit tests + 4 doctests passing, zero unintended dependencies verified.

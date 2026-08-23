@@ -73,6 +73,12 @@ impl SpringRect {
         rect
     }
 
+    /// Creates a new `SpringRect` whose fill and stroke derive from the palette's accent color.
+    pub fn from_palette(target_rect: Rect, palette: &egui_themes::ThemePalette) -> Self {
+        let config = crate::config::HighlightConfig::from_palette(palette);
+        Self::from_config(target_rect, &config)
+    }
+
     /// Applies a `HighlightConfig` directly to this `SpringRect`.
     pub fn apply_config(&mut self, config: &crate::config::HighlightConfig) {
         self.set_motion(config.motion);

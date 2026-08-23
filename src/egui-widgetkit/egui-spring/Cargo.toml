@@ -8,6 +8,7 @@ description = "Spring-driven animated widgets and selection highlights for egui"
 [dependencies]
 spring-core = { path = "../spring-core" }
 egui = { workspace = true }
+egui-themes = { path = "../egui-themes" }
 
 [dev-dependencies]
 eframe = { workspace = true }

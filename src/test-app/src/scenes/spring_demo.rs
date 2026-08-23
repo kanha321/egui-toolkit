@@ -6,6 +6,7 @@ use egui::{
 };
 use egui_layout::Split;
 use egui_spring::SpringRect;
+use egui_themes::ThemePalette;
 use spring_core::{Spring, SpringParams};
 
 /// The available spring animation presets.
@@ -83,7 +84,7 @@ impl Default for SpringDemoState {
 }
 
 impl SpringDemoState {
-    pub fn update(&mut self, raw_dt: f32) {
+    pub fn update(&mut self, raw_dt: f32, palette: &ThemePalette) {
         let dt = raw_dt * self.speed_scale;
         self.custom_spring.params = SpringParams::new(self.custom_frequency, self.custom_damping);
 
@@ -91,7 +92,7 @@ impl SpringDemoState {
         match self.highlight_preset {
             HighlightPreset::Off => {
                 self.selection_highlight.set_motion(spring_core::MotionPhysics::Off);
-                let accent_color = Color32::from_rgb(180, 190, 205);
+                let accent_color = palette.subtext0;
                 self.selection_highlight.set_stroke(Stroke::new(1.5, accent_color));
                 self.selection_highlight.set_fill(Color32::from_rgba_unmultiplied(
                     accent_color.r(),
@@ -102,7 +103,7 @@ impl SpringDemoState {
             }
             HighlightPreset::Gentle => {
                 self.selection_highlight.set_motion(spring_core::MotionPhysics::Gentle);
-                let accent_color = Color32::from_rgb(203, 166, 247);
+                let accent_color = palette.accent;
                 self.selection_highlight.set_stroke(Stroke::new(1.5, accent_color));
                 self.selection_highlight.set_fill(Color32::from_rgba_unmultiplied(
                     accent_color.r(),
@@ -113,7 +114,7 @@ impl SpringDemoState {
             }
             HighlightPreset::Snappy => {
                 self.selection_highlight.set_motion(spring_core::MotionPhysics::Snappy);
-                let accent_color = Color32::from_rgb(166, 227, 161);
+                let accent_color = palette.success;
                 self.selection_highlight.set_stroke(Stroke::new(1.5, accent_color));
                 self.selection_highlight.set_fill(Color32::from_rgba_unmultiplied(
                     accent_color.r(),
@@ -124,7 +125,7 @@ impl SpringDemoState {
             }
             HighlightPreset::Preferred => {
                 self.selection_highlight.set_motion(spring_core::MotionPhysics::Default);
-                let accent_color = Color32::from_rgb(0, 255, 136);
+                let accent_color = palette.info_alt;
                 self.selection_highlight.set_stroke(Stroke::new(1.5, accent_color));
                 self.selection_highlight.set_fill(Color32::from_rgba_unmultiplied(
                     accent_color.r(),
@@ -135,7 +136,7 @@ impl SpringDemoState {
             }
             HighlightPreset::OpenRGB => {
                 self.selection_highlight.set_motion(spring_core::MotionPhysics::OpenRGB);
-                let accent_color = Color32::from_rgb(137, 180, 250);
+                let accent_color = palette.info;
                 self.selection_highlight.set_stroke(Stroke::new(1.5, accent_color));
                 self.selection_highlight.set_fill(Color32::from_rgba_unmultiplied(
                     accent_color.r(),
@@ -147,7 +148,7 @@ impl SpringDemoState {
             HighlightPreset::Custom => {
                 let params = SpringParams::new(self.custom_frequency, self.custom_damping);
                 self.selection_highlight.set_params(params);
-                let accent_color = Color32::from_rgb(137, 220, 235);
+                let accent_color = palette.sys_controls;
                 self.selection_highlight.set_stroke(Stroke::new(1.5, accent_color));
                 self.selection_highlight.set_fill(Color32::from_rgba_unmultiplied(
                     accent_color.r(),
@@ -190,9 +191,9 @@ impl SpringDemoState {
     }
 }
 
-pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
+pub fn show(ui: &mut Ui, state: &mut SpringDemoState, palette: &ThemePalette) {
     let raw_dt = ui.input(|i| i.stable_dt).min(0.05);
-    state.update(raw_dt);
+    state.update(raw_dt, palette);
 
     // Continuous motion repaint rule (CODING_RULES §4):
     if state.is_animating() {
@@ -233,13 +234,13 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
                 // Clean header bar
                 ui.horizontal_wrapped(|ui| {
                     ui.colored_label(
-                        Color32::from_rgb(0, 255, 136),
+                        palette.info_alt,
                         egui::RichText::new("🎯 2D Bézier Morphing Highlight").strong().size(13.5),
                     );
                     ui.label(
                         egui::RichText::new("• 4-Corner Elastic Highlight")
                             .size(11.0)
-                            .color(Color32::from_rgb(166, 173, 200)),
+                            .color(palette.subtext0),
                     );
 
                     ui.separator();
@@ -327,8 +328,8 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
                                 ui.painter().rect(
                                     rect,
                                     comp.rounding,
-                                    Color32::from_rgb(30, 30, 46),
-                                    Stroke::new(1.0, Color32::from_rgb(49, 50, 68)),
+                                    palette.base,
+                                    Stroke::new(1.0, palette.surface0),
                                 );
 
                                 ui.painter().text(
@@ -336,14 +337,14 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
                                     egui::Align2::LEFT_TOP,
                                     comp.title,
                                     egui::FontId::proportional(12.0),
-                                    Color32::from_rgb(205, 214, 244),
+                                    palette.text,
                                 );
                                 ui.painter().text(
                                     rect.min + Vec2::new(12.0, 28.0),
                                     egui::Align2::LEFT_TOP,
                                     comp.subtitle,
                                     egui::FontId::monospace(9.0),
-                                    Color32::from_rgb(147, 153, 178),
+                                    palette.overlay2,
                                 );
                             }
                         });
@@ -367,8 +368,8 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
                                 ui.painter().rect(
                                     rect,
                                     comp.rounding,
-                                    Color32::from_rgb(30, 30, 46),
-                                    Stroke::new(1.0, Color32::from_rgb(49, 50, 68)),
+                                    palette.base,
+                                    Stroke::new(1.0, palette.surface0),
                                 );
 
                                 ui.painter().text(
@@ -376,14 +377,14 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
                                     egui::Align2::LEFT_TOP,
                                     comp.title,
                                     egui::FontId::proportional(12.0),
-                                    Color32::from_rgb(205, 214, 244),
+                                    palette.text,
                                 );
                                 ui.painter().text(
                                     rect.min + Vec2::new(12.0, 28.0),
                                     egui::Align2::LEFT_TOP,
                                     comp.subtitle,
                                     egui::FontId::monospace(9.0),
-                                    Color32::from_rgb(147, 153, 178),
+                                    palette.overlay2,
                                 );
                             }
                         });
@@ -408,7 +409,7 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
 
                         ui.horizontal_wrapped(|ui| {
                             ui.colored_label(
-                                Color32::from_rgb(137, 180, 250),
+                                palette.info,
                                 egui::RichText::new("⚡ 1D Analytical ODE Tracks").strong().size(13.0),
                             );
 
@@ -444,12 +445,13 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
 
                         let track_height = 42.0;
                         render_spring_track(
+                            palette,
                             ui,
                             "Default (1.75x • ω0 = 20, ζ = 0.50)",
                             preferred_spring.value(),
                             preferred_spring.velocity(),
                             target_copy,
-                            Color32::from_rgb(0, 255, 136),
+                            palette.info_alt,
                             track_height,
                             |t| {
                                 *target_val = t;
@@ -463,12 +465,13 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
 
                         ui.add_space(3.0);
                         render_spring_track(
+                            palette,
                             ui,
                             "Snappy (ω0 = 32, ζ = 0.85)",
                             snappy_spring.value(),
                             snappy_spring.velocity(),
                             target_copy,
-                            Color32::from_rgb(166, 227, 161),
+                            palette.success,
                             track_height,
                             |t| {
                                 *target_val = t;
@@ -482,12 +485,13 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
 
                         ui.add_space(3.0);
                         render_spring_track(
+                            palette,
                             ui,
                             "Gentle (ω0 = 18, ζ = 0.90)",
                             gentle_spring.value(),
                             gentle_spring.velocity(),
                             target_copy,
-                            Color32::from_rgb(203, 166, 247),
+                            palette.accent,
                             track_height,
                             |t| {
                                 *target_val = t;
@@ -501,12 +505,13 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
 
                         ui.add_space(3.0);
                         render_spring_track(
+                            palette,
                             ui,
                             "OpenRGB (ω0 = 22, ζ = 0.65)",
                             openrgb_spring.value(),
                             openrgb_spring.velocity(),
                             target_copy,
-                            Color32::from_rgb(137, 180, 250),
+                            palette.info,
                             track_height,
                             |t| {
                                 *target_val = t;
@@ -528,12 +533,13 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
                         };
 
                         render_spring_track(
+                            palette,
                             ui,
                             &format!("Custom ({:.0}/{:.2} — {})", custom_freq_copy, custom_damp_copy, regime_label),
                             custom_spring.value(),
                             custom_spring.velocity(),
                             target_copy,
-                            Color32::from_rgb(137, 220, 235),
+                            palette.sys_controls,
                             track_height,
                             |t| {
                                 *target_val = t;
@@ -551,6 +557,7 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
                         ui.label(egui::RichText::new("📈 Real-Time Trajectory Trace").strong().size(13.0));
                         ui.add_space(4.0);
                         render_oscilloscope_views(
+                            palette,
                             ui,
                             target_copy,
                             history_gentle,
@@ -575,7 +582,7 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
                                 r.nw, r.ne, r.se, r.sw
                             ))
                             .size(11.0)
-                            .color(Color32::from_rgb(166, 173, 200)),
+                            .color(palette.subtext0),
                         );
                     });
                 })
@@ -585,6 +592,7 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
 }
 
 fn render_spring_track(
+    palette: &ThemePalette,
     ui: &mut Ui,
     title: &str,
     current_val: f32,
@@ -612,8 +620,8 @@ fn render_spring_track(
     painter.rect(
         rect,
         Rounding::same(6.0),
-        Color32::from_rgb(30, 32, 48),
-        Stroke::new(1.0, Color32::from_rgb(69, 71, 90)),
+        palette.base,
+        Stroke::new(1.0, palette.surface1),
     );
 
     // Top Label Row: Short Title on Left, Telemetry on Right
@@ -622,7 +630,7 @@ fn render_spring_track(
         egui::Align2::LEFT_TOP,
         title,
         egui::FontId::proportional(11.0),
-        Color32::from_rgb(205, 214, 244),
+        palette.text,
     );
 
     let telemetry = format!("p:{:.2} v:{:+.1}", current_val, velocity);
@@ -631,7 +639,7 @@ fn render_spring_track(
         egui::Align2::RIGHT_TOP,
         telemetry,
         egui::FontId::monospace(9.5),
-        Color32::from_rgb(147, 153, 178),
+        palette.overlay2,
     );
 
     // Bottom Track Rail Row (Dedicated y-position at rect.min.y + 28.0)
@@ -644,14 +652,14 @@ fn render_spring_track(
     // Track rail
     painter.line_segment(
         [Pos2::new(track_min_x, track_y), Pos2::new(track_max_x, track_y)],
-        Stroke::new(2.5, Color32::from_rgb(49, 50, 68)),
+        Stroke::new(2.5, palette.surface0),
     );
 
     // Target marker (vertical pin)
     let target_x = track_min_x + target_val * track_w;
     painter.line_segment(
         [Pos2::new(target_x, track_y - 6.0), Pos2::new(target_x, track_y + 6.0)],
-        Stroke::new(2.0, Color32::from_rgb(186, 194, 222)),
+        Stroke::new(2.0, palette.subtext1),
     );
 
     // Spring coil lines
@@ -663,21 +671,22 @@ fn render_spring_track(
         let x = track_min_x + (current_x - track_min_x) * frac;
         let y_offset = if i % 2 == 1 { -3.0 } else { 3.0 };
         let pt = Pos2::new(x, track_y + y_offset);
-        painter.line_segment([prev_pt, pt], Stroke::new(1.0, Color32::from_rgb(108, 112, 134)));
+        painter.line_segment([prev_pt, pt], Stroke::new(1.0, palette.overlay0));
         prev_pt = pt;
     }
-    painter.line_segment([prev_pt, Pos2::new(current_x, track_y)], Stroke::new(1.0, Color32::from_rgb(108, 112, 134)));
+    painter.line_segment([prev_pt, Pos2::new(current_x, track_y)], Stroke::new(1.0, palette.overlay0));
 
     // Animated ball head
     painter.circle(
         Pos2::new(current_x, track_y),
         6.0,
         accent,
-        Stroke::new(1.5, Color32::WHITE),
+        Stroke::new(1.5, palette.text),
     );
 }
 
 fn render_oscilloscope_views(
+    palette: &ThemePalette,
     ui: &mut Ui,
     target_val: f32,
     history_gentle: &[f32],
@@ -693,22 +702,22 @@ fn render_oscilloscope_views(
     painter.rect(
         rect,
         Rounding::same(4.0),
-        Color32::from_rgb(24, 24, 37),
-        Stroke::new(1.0, Color32::from_rgb(49, 50, 68)),
+        palette.crust,
+        Stroke::new(1.0, palette.surface0),
     );
 
     // Target baseline
     let target_y = rect.max.y - (target_val * (rect.height() - 16.0) + 8.0);
     painter.line_segment(
         [Pos2::new(rect.min.x, target_y), Pos2::new(rect.max.x, target_y)],
-        Stroke::new(1.0, Color32::from_rgb(69, 71, 90)),
+        Stroke::new(1.0, palette.surface1),
     );
 
-    draw_trace(&painter, rect, history_gentle, Color32::from_rgb(203, 166, 247));
-    draw_trace(&painter, rect, history_snappy, Color32::from_rgb(166, 227, 161));
-    draw_trace(&painter, rect, history_preferred, Color32::from_rgb(0, 255, 136));
-    draw_trace(&painter, rect, history_openrgb, Color32::from_rgb(137, 180, 250));
-    draw_trace(&painter, rect, history_custom, Color32::from_rgb(137, 220, 235));
+    draw_trace(&painter, rect, history_gentle, palette.accent);
+    draw_trace(&painter, rect, history_snappy, palette.success);
+    draw_trace(&painter, rect, history_preferred, palette.info_alt);
+    draw_trace(&painter, rect, history_openrgb, palette.info);
+    draw_trace(&painter, rect, history_custom, palette.sys_controls);
 }
 
 fn draw_trace(painter: &egui::Painter, rect: Rect, history: &[f32], color: Color32) {

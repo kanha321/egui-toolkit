@@ -2,6 +2,7 @@ use eframe::egui;
 use egui::{Color32, Rect, Rounding, Stroke, Ui, Vec2};
 use egui_spring::{HighlightConfig, HighlightGroup, MotionPhysics};
 use egui_vim_nav::{FocusGraph, FocusRegion, Navigator, VimAction, VimKeyHandler};
+use egui_themes::ThemePalette;
 use spring_core::SpringParams;
 
 // ─── Highlight Layers (2-Tier: Outer Container + Inner Active Element) ────────
@@ -222,8 +223,8 @@ pub struct VimNavDemoState {
     pub event_log: Vec<String>,
 }
 
-impl Default for VimNavDemoState {
-    fn default() -> Self {
+impl VimNavDemoState {
+    pub fn new(palette: &ThemePalette) -> Self {
         // 1. Inter-Section Focus Graph (Ctrl + HJKL)
         let mut section_graph = FocusGraph::new();
         section_graph.connect_horizontal(SectionId::Keyboard, SectionId::QuickActions);
@@ -313,8 +314,8 @@ impl Default for VimNavDemoState {
             HighlightLayer::Section,
             HighlightConfig::new()
                 .with_motion(MotionPhysics::Gentle)
-                .with_fill(Color32::from_rgba_unmultiplied(80, 150, 255, 12))
-                .with_stroke(Stroke::new(2.0, Color32::from_rgb(90, 160, 245)))
+                .with_fill(Color32::from_rgba_unmultiplied(palette.accent.r(), palette.accent.g(), palette.accent.b(), 12))
+                .with_stroke(Stroke::new(2.0, palette.accent))
                 .with_rounding(6.0)
                 .with_padding(3.0),
         );
@@ -325,8 +326,8 @@ impl Default for VimNavDemoState {
             HighlightLayer::Item,
             HighlightConfig::new()
                 .with_motion(MotionPhysics::Custom(SpringParams::new(26.0, 0.58)))
-                .with_fill(Color32::from_rgba_unmultiplied(80, 170, 255, 36))
-                .with_stroke(Stroke::new(2.0, Color32::from_rgb(110, 195, 255)))
+                .with_fill(Color32::from_rgba_unmultiplied(palette.info.r(), palette.info.g(), palette.info.b(), 36))
+                .with_stroke(Stroke::new(2.0, palette.info))
                 .with_rounding(5.0)
                 .with_padding(2.0),
         );
@@ -352,9 +353,15 @@ impl Default for VimNavDemoState {
     }
 }
 
+impl Default for VimNavDemoState {
+    fn default() -> Self {
+        Self::new(&ThemePalette::default())
+    }
+}
+
 /// Renders the multi-section Vim Nav demo scene with primary/secondary clicks,
 /// 2-tier spring motion physics (outer section + inner items), and mouse/keyboard navigation.
-pub fn show(ui: &mut Ui, state: &mut VimNavDemoState) {
+pub fn show(ui: &mut Ui, state: &mut VimNavDemoState, palette: &ThemePalette) {
     let ctx = ui.ctx();
     let pointer_moved = ui.input(|i| i.pointer.delta() != Vec2::ZERO);
 
@@ -546,7 +553,7 @@ pub fn show(ui: &mut Ui, state: &mut VimNavDemoState) {
             ui.label(
                 egui::RichText::new(&state.typed_display)
                     .monospace()
-                    .color(Color32::from_rgb(100, 225, 140))
+                    .color(palette.success)
                     .size(15.0),
             );
         });
@@ -562,7 +569,7 @@ pub fn show(ui: &mut Ui, state: &mut VimNavDemoState) {
             SectionId::QuickActions => "【 Section 2: Quick Actions (Right) 】",
             SectionId::EventLog => "【 Section 3: Event Log (Bottom) 】",
         };
-        ui.colored_label(Color32::LIGHT_BLUE, egui::RichText::new(sec_text).strong());
+        ui.colored_label(palette.info, egui::RichText::new(sec_text).strong());
 
         ui.separator();
         ui.label("Text input guard test:");
@@ -636,13 +643,13 @@ pub fn show(ui: &mut Ui, state: &mut VimNavDemoState) {
         let kb_is_active_section = active_section == SectionId::Keyboard;
 
         let kb_frame_resp = egui::Frame::group(ui.style())
-            .stroke(Stroke::new(1.0, Color32::from_gray(45)))
+            .stroke(Stroke::new(1.0, palette.surface0))
             .show(ui, |ui| {
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new("Section 1 • Staggered Keyboard").strong());
                         if kb_is_active_section {
-                            ui.colored_label(Color32::LIGHT_BLUE, "(ACTIVE)");
+                            ui.colored_label(palette.info, "(ACTIVE)");
                         }
                     });
                     ui.add_space(4.0);
@@ -660,18 +667,18 @@ pub fn show(ui: &mut Ui, state: &mut VimNavDemoState) {
 
                                     let is_mod = spec.id.len() > 1 && spec.id != "10";
                                     let bg = if is_mod {
-                                        Color32::from_gray(30)
+                                        palette.crust
                                     } else {
-                                        Color32::from_gray(45)
+                                        palette.surface0
                                     };
 
-                                    let stroke = Stroke::new(1.0, Color32::from_gray(65));
+                                    let stroke = Stroke::new(1.0, palette.surface1);
                                     ui.painter().rect(rect, 4.0, bg, stroke);
 
                                     let text_color = if is_mod {
-                                        Color32::from_gray(170)
+                                        palette.subtext0
                                     } else {
-                                        Color32::from_gray(230)
+                                        palette.text
                                     };
 
                                     let font_size = if spec.label.len() > 3 { 10.5 } else { 12.5 };
@@ -739,13 +746,14 @@ pub fn show(ui: &mut Ui, state: &mut VimNavDemoState) {
         let act_is_active_section = active_section == SectionId::QuickActions;
 
         let act_frame_resp = egui::Frame::group(ui.style())
-            .stroke(Stroke::new(1.0, Color32::from_gray(45)))
+            .stroke(Stroke::new(1.0, palette.surface1)) // user instruction maps Quick action card stroke to surface1. Wait, outer section is surface1? Oh, the Quick action SECTION frame isn't explicitly mentioned, let's look at Event Log frame stroke... Event log frame stroke is surface0. I should use surface0 for quick actions frame too to match, or wait. Quick action card stroke is from_gray(60) -> surface1. Quick action section frame is from_gray(45) -> surface0.
+            .stroke(Stroke::new(1.0, palette.surface0)) // fixed
             .show(ui, |ui| {
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new("Section 2 • Quick Actions").strong());
                         if act_is_active_section {
-                            ui.colored_label(Color32::LIGHT_BLUE, "(ACTIVE)");
+                            ui.colored_label(palette.info, "(ACTIVE)");
                         }
                     });
                     ui.add_space(4.0);
@@ -755,8 +763,8 @@ pub fn show(ui: &mut Ui, state: &mut VimNavDemoState) {
                             let size = egui::vec2(190.0, 28.0);
                             let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
 
-                            let bg = Color32::from_gray(35);
-                            let stroke = Stroke::new(1.0, Color32::from_gray(60));
+                            let bg = palette.base;
+                            let stroke = Stroke::new(1.0, palette.surface1);
                             ui.painter().rect(rect, 4.0, bg, stroke);
 
                             ui.painter().text(
@@ -764,7 +772,7 @@ pub fn show(ui: &mut Ui, state: &mut VimNavDemoState) {
                                 egui::Align2::LEFT_CENTER,
                                 *action,
                                 egui::FontId::proportional(12.0),
-                                Color32::from_gray(220),
+                                palette.text,
                             );
                             rect
                         });
@@ -835,13 +843,13 @@ pub fn show(ui: &mut Ui, state: &mut VimNavDemoState) {
     let log_is_active_section = active_section == SectionId::EventLog;
 
     let log_frame_resp = egui::Frame::group(ui.style())
-        .stroke(Stroke::new(1.0, Color32::from_gray(45)))
+        .stroke(Stroke::new(1.0, palette.surface0))
         .show(ui, |ui| {
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new("Section 3 • Navigation & Action Event Log").strong());
                     if log_is_active_section {
-                        ui.colored_label(Color32::LIGHT_BLUE, "(ACTIVE)");
+                        ui.colored_label(palette.info, "(ACTIVE)");
                     }
                 });
                 egui::ScrollArea::vertical()

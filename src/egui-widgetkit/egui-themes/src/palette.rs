@@ -1,20 +1,16 @@
-use egui::Color32;
+//! Theme palettes and curated presets module.
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct Palette {
-    pub name: String,
-    pub base: Color32,
-    pub mantle: Color32,
-    pub accent: Color32,
-}
+pub mod catppuccin;
+pub mod dracula;
+pub mod gruvbox;
+pub mod material_ocean;
+pub mod monokai_pro;
+pub mod night_owl;
+pub mod one_dark_pro;
+pub mod preset;
+pub mod rose_pine;
+pub mod theme_palette;
+pub mod tokyo_night;
 
-impl Palette {
-    pub fn dark() -> Self {
-        Self {
-            name: "Dark".to_string(),
-            base: Color32::from_rgb(30, 30, 46),
-            mantle: Color32::from_rgb(24, 24, 37),
-            accent: Color32::from_rgb(203, 166, 247),
-        }
-    }
-}
+pub use preset::ThemePreset;
+pub use theme_palette::ThemePalette;
