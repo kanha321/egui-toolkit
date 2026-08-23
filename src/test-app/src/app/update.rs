@@ -4,6 +4,11 @@ use crate::scenes::{combined_demo, layout_demo, nav_stack_demo, spring_demo, the
 
 impl eframe::App for TestAppState {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Advance theme morphing and synchronize visuals with egui context
+        let dt = ctx.input(|i| i.stable_dt.min(0.1));
+        self.theme.update(dt, ctx);
+        self.theme.apply_to_ctx(ctx);
+
         // Dynamically enforce minimum window size based on active scene layout calculation
         let dynamic_min_size = match self.active_scene {
             ActiveScene::Layout => layout_demo::min_layout_size(),
@@ -23,13 +28,16 @@ impl eframe::App for TestAppState {
             });
         });
 
+        // Clone palette reference for borrow-safe scene rendering
+        let palette = self.theme.current.clone();
+
         egui::CentralPanel::default().show(ctx, |ui| {
             match self.active_scene {
-                ActiveScene::Layout => layout_demo::show(ui),
-                ActiveScene::Spring => spring_demo::show(ui, &mut self.spring_demo),
-                ActiveScene::VimNav => vim_nav_demo::show(ui, &mut self.vim_nav_demo),
-                ActiveScene::NavStack => nav_stack_demo::show(ui),
-                ActiveScene::Theme => theme_demo::show(ui),
+                ActiveScene::Layout => layout_demo::show(ui, &palette),
+                ActiveScene::Spring => spring_demo::show(ui, &mut self.spring_demo, &palette),
+                ActiveScene::VimNav => vim_nav_demo::show(ui, &mut self.vim_nav_demo, &palette),
+                ActiveScene::NavStack => nav_stack_demo::show(ui, &mut self.nav_stack_demo, &palette),
+                ActiveScene::Theme => theme_demo::show(ui, &mut self.theme),
                 ActiveScene::Combined => combined_demo::show(ui),
             }
         });

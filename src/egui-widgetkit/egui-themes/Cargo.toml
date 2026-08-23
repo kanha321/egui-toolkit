@@ -7,3 +7,6 @@ description = "Token-based theme system, palette presets, and live preview for e
 
 [dependencies]
 egui = { workspace = true }
+
+[dev-dependencies]
+eframe = { workspace = true }

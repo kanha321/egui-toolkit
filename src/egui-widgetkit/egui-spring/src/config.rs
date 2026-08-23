@@ -1,6 +1,7 @@
 //! Configuration descriptor for spring highlight styling and motion physics.
 
 use egui::{Color32, Rounding, Stroke};
+use egui_themes::ThemePalette;
 use spring_core::MotionPhysics;
 
 /// Reusable configuration bundle for a highlight's physics, colors, and geometry.
@@ -36,6 +37,18 @@ impl HighlightConfig {
     /// Creates a new configuration with default settings.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Creates a new configuration whose fill and stroke derive from the palette's accent color.
+    pub fn from_palette(palette: &ThemePalette) -> Self {
+        let accent = palette.accent;
+        Self {
+            motion: MotionPhysics::Default,
+            fill: Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 14),
+            stroke: Stroke::new(1.5, accent),
+            rounding: Rounding::same(6.0),
+            padding: 3.0,
+        }
     }
 
     /// Sets the motion physics mode.

@@ -24,7 +24,7 @@ supplies, or it doesn't belong in egui-widgetkit at all.
 |---|---|---|
 | `egui-layout` | `egui` | any other crate in this workspace, any app type (`test-app` included) |
 | `spring-core` | *(nothing but small general-purpose crates)* | `egui`, any other crate in this workspace, any app type |
-| `egui-spring` | `spring-core`, `egui` | any app type |
+| `egui-spring` | `spring-core`, `egui`, `egui-themes` | any app type |
 | `egui-vim-nav` | `egui` | any other crate in this workspace, any app type |
 | `egui-nav-stack` | `egui`; optionally `egui-spring` (behind `animated-transitions` feature, off by default) | `egui-layout`, `egui-vim-nav`, `egui-themes`, any app type |
 | `egui-themes` | `egui` | any other crate in this workspace, any app type |

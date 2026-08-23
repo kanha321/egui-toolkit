@@ -47,6 +47,8 @@ pub struct Section<'a> {
     pub subtitle: Option<String>,
     /// Optional accent color for title text.
     pub title_color: Option<Color32>,
+    /// Optional accent color for subtitle text.
+    pub subtitle_color: Option<Color32>,
     /// Background fill color for the card container.
     pub bg: Option<Color32>,
     /// Border stroke for the card container.
@@ -79,6 +81,7 @@ impl<'a> Section<'a> {
             title: None,
             subtitle: None,
             title_color: None,
+            subtitle_color: None,
             bg: None,
             stroke: None,
             rounding: None,
@@ -163,6 +166,12 @@ impl<'a> Section<'a> {
     /// Sets the title text color.
     pub fn title_color(mut self, color: Color32) -> Self {
         self.title_color = Some(color);
+        self
+    }
+
+    /// Sets the subtitle text color.
+    pub fn subtitle_color(mut self, color: Color32) -> Self {
+        self.subtitle_color = Some(color);
         self
     }
 

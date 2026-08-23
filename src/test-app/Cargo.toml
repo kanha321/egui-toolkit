@@ -10,7 +10,7 @@ egui-layout    = { path = "../egui-widgetkit/egui-layout" }
 spring-core    = { path = "../egui-widgetkit/spring-core" }
 egui-spring    = { path = "../egui-widgetkit/egui-spring" }
 egui-vim-nav   = { path = "../egui-widgetkit/egui-vim-nav" }
-egui-nav-stack = { path = "../egui-widgetkit/egui-nav-stack" }
+egui-nav-stack = { path = "../egui-widgetkit/egui-nav-stack", features = ["animated-transitions"] }
 egui-themes    = { path = "../egui-widgetkit/egui-themes" }
 eframe         = { workspace = true }
 egui           = { workspace = true }

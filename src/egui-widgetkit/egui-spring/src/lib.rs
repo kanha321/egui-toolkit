@@ -23,5 +23,5 @@ pub use bezier::{build_bezier_boundary, BEZIER_KAPPA};
 pub use config::HighlightConfig;
 pub use corner_springs::{CornerSprings, SpringPoint};
 pub use group::HighlightGroup;
-pub use spring_core::{MotionPhysics, SpringParams};
+pub use spring_core::{MotionPhysics, Spring, SpringParams};
 pub use spring_rect::SpringRect;

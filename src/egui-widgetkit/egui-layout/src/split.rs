@@ -1,8 +1,9 @@
 //! Declarative, responsive, constraint-aware nested split layouts for egui.
 
-use egui::{Align, Color32, Layout, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui, Vec2};
+use egui::{Align, Layout, Pos2, Rect, Response, Rounding, Sense, Ui, Vec2};
 use crate::section::Section;
 use crate::size::Size;
+use crate::style::SplitStyle;
 
 /// Layout axis for `Split`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -17,6 +18,29 @@ pub enum Direction {
 ///
 /// Supports proportional fractions, fixed pixel sizes, 2D minimum/maximum constraints,
 /// automatic remainder expansion, visual card framing, and automatic layout bounding.
+///
+/// # Customization
+///
+/// Use [`SplitStyle`] to configure global defaults for all card sections:
+///
+/// ```rust
+/// use egui_layout::{Split, SplitStyle};
+///
+/// # egui::__run_test_ctx(|ctx| {
+/// # egui::CentralPanel::default().show(ctx, |ui| {
+/// Split::horizontal()
+///     .style(
+///         SplitStyle::default()
+///             .with_spacing(8.0)
+///             .with_card_rounding(12.0)
+///             .with_card_padding(10.0)
+///     )
+///     .section(0.5, |ui| { ui.label("Left"); })
+///     .section(0.5, |ui| { ui.label("Right"); })
+///     .show(ui);
+/// # });
+/// # });
+/// ```
 ///
 /// # State Ownership
 ///
@@ -50,7 +74,7 @@ pub enum Direction {
 /// ```
 pub struct Split<'a> {
     direction: Direction,
-    spacing: f32,
+    style: SplitStyle,
     sections: Vec<Section<'a>>,
 }
 
@@ -59,7 +83,7 @@ impl<'a> Split<'a> {
     pub fn horizontal() -> Self {
         Self {
             direction: Direction::Horizontal,
-            spacing: 4.0,
+            style: SplitStyle::default(),
             sections: Vec::new(),
         }
     }
@@ -68,16 +92,46 @@ impl<'a> Split<'a> {
     pub fn vertical() -> Self {
         Self {
             direction: Direction::Vertical,
-            spacing: 4.0,
+            style: SplitStyle::default(),
             sections: Vec::new(),
         }
     }
 
-    /// Sets the inter-section spacing in logical points (default: `4.0`).
-    pub fn spacing(mut self, px: f32) -> Self {
-        self.spacing = px.max(0.0);
+    // ── Style Configuration ──
+
+    /// Sets the full visual style for this split and all its card sections.
+    ///
+    /// Individual `Section` overrides still take precedence over `SplitStyle` defaults.
+    pub fn style(mut self, style: SplitStyle) -> Self {
+        self.style = style;
         self
     }
+
+    /// Sets the inter-section spacing in logical points (default: `4.0`).
+    ///
+    /// Shorthand for modifying `self.style.spacing`.
+    pub fn spacing(mut self, px: f32) -> Self {
+        self.style.spacing = px.max(0.0);
+        self
+    }
+
+    /// Sets the default card corner rounding for all sections.
+    ///
+    /// Shorthand for modifying `self.style.card_rounding`.
+    pub fn card_rounding(mut self, radius: f32) -> Self {
+        self.style.card_rounding = Rounding::same(radius.max(0.0));
+        self
+    }
+
+    /// Sets the default card inner padding for all sections.
+    ///
+    /// Shorthand for modifying `self.style.card_padding`.
+    pub fn card_padding(mut self, padding: f32) -> Self {
+        self.style.card_padding = padding.max(0.0);
+        self
+    }
+
+    // ── Section Addition ──
 
     /// Appends a fully configured `Section` instance.
     pub fn add_section(mut self, section: Section<'a>) -> Self {
@@ -205,6 +259,8 @@ impl<'a> Split<'a> {
         self
     }
 
+    // ── Queries ──
+
     /// Returns the number of sections currently added to this split.
     pub fn len(&self) -> usize {
         self.sections.len()
@@ -224,7 +280,7 @@ impl<'a> Split<'a> {
     /// to satisfy all section constraints and inter-section spacing.
     pub fn min_primary_length(&self) -> f32 {
         let policies: Vec<Size> = self.sections.iter().map(|s| s.size).collect();
-        Self::compute_min_length(self.spacing, &policies)
+        Self::compute_min_length(self.style.spacing, &policies)
     }
 
     /// Calculates the minimum required length along the cross axis across all sections.
@@ -260,6 +316,8 @@ impl<'a> Split<'a> {
             ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(min_size));
         }
     }
+
+    // ── Static computation helpers ──
 
     /// Calculates the minimum required length along the primary axis for a set of policies and spacing.
     pub fn compute_min_length(spacing: f32, policies: &[Size]) -> f32 {
@@ -410,6 +468,8 @@ impl<'a> Split<'a> {
         sizes
     }
 
+    // ── Rendering ──
+
     /// Renders the split layout, allocating sub-UIs for each section and consuming available space.
     pub fn show(self, ui: &mut Ui) -> Response {
         let n = self.sections.len();
@@ -418,41 +478,64 @@ impl<'a> Split<'a> {
         }
 
         let available = ui.available_size();
+        let frame_padding = self.style.frame_padding;
+
+        // Account for outer frame padding in available space
+        let inner_available = Vec2::new(
+            (available.x - frame_padding * 2.0).max(0.0),
+            (available.y - frame_padding * 2.0).max(0.0),
+        );
+
         let (primary_len, _cross_len) = match self.direction {
-            Direction::Horizontal => (available.x, available.y),
-            Direction::Vertical => (available.y, available.x),
+            Direction::Horizontal => (inner_available.x, inner_available.y),
+            Direction::Vertical => (inner_available.y, inner_available.x),
         };
 
         let policies: Vec<Size> = self.sections.iter().map(|s| s.size).collect();
-        let sizes = Self::compute_sizes_with_policy(primary_len, self.spacing, &policies);
+        let sizes = Self::compute_sizes_with_policy(primary_len, self.style.spacing, &policies);
 
         let (total_rect, response) = ui.allocate_exact_size(available, Sense::hover());
 
+        // Draw outer frame if configured
+        let has_outer_frame = self.style.frame_bg.is_some() || self.style.frame_stroke.is_some();
+        if has_outer_frame {
+            let frame_bg = self.style.frame_bg.unwrap_or(egui::Color32::TRANSPARENT);
+            let frame_stroke = self.style.frame_stroke.unwrap_or(egui::Stroke::NONE);
+            ui.painter().rect(total_rect, self.style.frame_rounding, frame_bg, frame_stroke);
+        }
+
+        // Inner rect after frame padding
+        let inner_rect = if frame_padding > 0.0 {
+            total_rect.shrink(frame_padding)
+        } else {
+            total_rect
+        };
+
         match self.direction {
             Direction::Horizontal => {
-                let mut current_x = total_rect.min.x;
+                let mut current_x = inner_rect.min.x;
                 for (i, section) in self.sections.into_iter().enumerate() {
                     let w = sizes[i];
                     let section_rect = Rect::from_min_size(
-                        Pos2::new(current_x, total_rect.min.y),
-                        Vec2::new(w, total_rect.height()),
+                        Pos2::new(current_x, inner_rect.min.y),
+                        Vec2::new(w, inner_rect.height()),
                     );
 
-                    Self::render_section_slot(ui, section_rect, section);
-                    current_x += w + self.spacing;
+                    Self::render_section_slot(ui, section_rect, section, &self.style);
+                    current_x += w + self.style.spacing;
                 }
             }
             Direction::Vertical => {
-                let mut current_y = total_rect.min.y;
+                let mut current_y = inner_rect.min.y;
                 for (i, section) in self.sections.into_iter().enumerate() {
                     let h = sizes[i];
                     let section_rect = Rect::from_min_size(
-                        Pos2::new(total_rect.min.x, current_y),
-                        Vec2::new(total_rect.width(), h),
+                        Pos2::new(inner_rect.min.x, current_y),
+                        Vec2::new(inner_rect.width(), h),
                     );
 
-                    Self::render_section_slot(ui, section_rect, section);
-                    current_y += h + self.spacing;
+                    Self::render_section_slot(ui, section_rect, section, &self.style);
+                    current_y += h + self.style.spacing;
                 }
             }
         }
@@ -460,7 +543,7 @@ impl<'a> Split<'a> {
         response
     }
 
-    fn render_section_slot(ui: &mut Ui, section_rect: Rect, section: Section<'a>) {
+    fn render_section_slot(ui: &mut Ui, section_rect: Rect, section: Section<'a>, style: &SplitStyle) {
         if let Some(on_rect) = section.on_rect {
             on_rect(section_rect);
         }
@@ -470,14 +553,20 @@ impl<'a> Split<'a> {
                 return;
             }
 
-            let bg = section.bg.unwrap_or(Color32::from_rgb(30, 32, 48));
-            let stroke = section.stroke.unwrap_or(Stroke::new(1.0, Color32::from_rgb(60, 64, 82)));
-            let rounding = section.rounding.unwrap_or(Rounding::same(8.0));
+            // Resolution order: Section override > SplitStyle > ui.visuals() fallback
+            let bg = section.bg
+                .or(style.card_bg)
+                .unwrap_or(ui.visuals().faint_bg_color);
+            let stroke = section.stroke
+                .or(style.card_stroke)
+                .unwrap_or(ui.visuals().window_stroke);
+            let rounding = section.rounding
+                .unwrap_or(style.card_rounding);
 
             // Guaranteed intact 4 rounded corners
             ui.painter().rect(section_rect, rounding, bg, stroke);
 
-            let padding = section.padding.unwrap_or(8.0);
+            let padding = section.padding.unwrap_or(style.card_padding);
             let content_rect = section_rect.shrink(padding);
 
             if content_rect.width() > 0.0 && content_rect.height() > 0.0 {
@@ -485,13 +574,23 @@ impl<'a> Split<'a> {
                 child_ui.set_clip_rect(child_ui.clip_rect().intersect(content_rect));
 
                 if let Some(title) = &section.title {
-                    let title_color = section.title_color.unwrap_or(Color32::from_rgb(137, 180, 250));
-                    child_ui.colored_label(title_color, egui::RichText::new(title).strong().size(13.0));
+                    let title_color = section.title_color
+                        .or(style.title_color)
+                        .unwrap_or(ui.visuals().strong_text_color());
+                    child_ui.colored_label(
+                        title_color,
+                        egui::RichText::new(title).strong().size(style.title_size),
+                    );
                 }
 
                 if let Some(subtitle) = &section.subtitle {
                     if content_rect.height() > 28.0 {
-                        child_ui.label(egui::RichText::new(subtitle).size(10.5).color(Color32::from_rgb(166, 173, 200)));
+                        let subtitle_color = section.subtitle_color
+                            .or(style.subtitle_color)
+                            .unwrap_or(ui.visuals().text_color());
+                        child_ui.label(
+                            egui::RichText::new(subtitle).size(style.subtitle_size).color(subtitle_color),
+                        );
                     }
                 }
 
