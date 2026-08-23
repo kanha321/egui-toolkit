@@ -27,7 +27,7 @@ impl eframe::App for TestAppState {
             match self.active_scene {
                 ActiveScene::Layout => layout_demo::show(ui),
                 ActiveScene::Spring => spring_demo::show(ui, &mut self.spring_demo),
-                ActiveScene::VimNav => vim_nav_demo::show(ui),
+                ActiveScene::VimNav => vim_nav_demo::show(ui, &mut self.vim_nav_demo),
                 ActiveScene::NavStack => nav_stack_demo::show(ui),
                 ActiveScene::Theme => theme_demo::show(ui),
                 ActiveScene::Combined => combined_demo::show(ui),

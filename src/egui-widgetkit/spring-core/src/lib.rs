@@ -26,6 +26,6 @@ pub mod params;
 pub mod solver;
 pub mod spring;
 
-pub use params::SpringParams;
+pub use params::{MotionPhysics, SpringParams};
 pub use solver::{solve_step, SolverState};
 pub use spring::Spring;

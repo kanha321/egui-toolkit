@@ -81,3 +81,61 @@ impl SpringParams {
         self
     }
 }
+
+/// Motion physics mode for spring animations, including named presets and an instant `Off` mode.
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub enum MotionPhysics {
+    /// Motion physics is disabled — highlights snap instantly to target with zero animation.
+    Off,
+    /// Default balanced spring dynamics ($\omega_0 = 20.0, \zeta = 0.50$).
+    #[default]
+    Default,
+    /// Smooth, cushioned movement with heavy damping ($\omega_0 = 18.0, \zeta = 0.90$).
+    Gentle,
+    /// Crisp, rapid target snap ($\omega_0 = 32.0, \zeta = 0.85$).
+    Snappy,
+    /// Energetic elastic bounce with overshoot ($\omega_0 = 20.0, \zeta = 0.35$).
+    Bouncy,
+    /// OpenRGB / Neovide fluid travel ($\omega_0 = 22.0, \zeta = 0.65$).
+    OpenRGB,
+    /// Custom frequency ($\omega_0$) and damping ratio ($\zeta$).
+    Custom(SpringParams),
+}
+
+impl MotionPhysics {
+    /// Returns `true` if motion physics is disabled (`MotionPhysics::Off`).
+    pub const fn is_off(&self) -> bool {
+        matches!(self, Self::Off)
+    }
+
+    /// Returns `true` if motion physics is active (`!self.is_off()`).
+    pub const fn is_enabled(&self) -> bool {
+        !self.is_off()
+    }
+
+    /// Converts the motion physics mode to `Option<SpringParams>`, returning `None` when `Off`.
+    pub fn to_params(&self) -> Option<SpringParams> {
+        match self {
+            Self::Off => None,
+            Self::Default => Some(SpringParams::default()),
+            Self::Gentle => Some(SpringParams::gentle()),
+            Self::Snappy => Some(SpringParams::snappy()),
+            Self::Bouncy => Some(SpringParams::bouncy()),
+            Self::OpenRGB => Some(SpringParams::openrgb()),
+            Self::Custom(params) => Some(*params),
+        }
+    }
+
+    /// Convenience helper returning the display label for UI selectors.
+    pub const fn label(&self) -> &'static str {
+        match self {
+            Self::Off => "Off (Instant)",
+            Self::Default => "Default (20 / 0.50)",
+            Self::Gentle => "Gentle (18 / 0.90)",
+            Self::Snappy => "Snappy (32 / 0.85)",
+            Self::Bouncy => "Bouncy (20 / 0.35)",
+            Self::OpenRGB => "OpenRGB (22 / 0.65)",
+            Self::Custom(_) => "Custom",
+        }
+    }
+}

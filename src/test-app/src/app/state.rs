@@ -1,4 +1,5 @@
 use crate::scenes::spring_demo::SpringDemoState;
+use crate::scenes::vim_nav_demo::VimNavDemoState;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum ActiveScene {
@@ -15,4 +16,5 @@ pub enum ActiveScene {
 pub struct TestAppState {
     pub active_scene: ActiveScene,
     pub spring_demo: SpringDemoState,
+    pub vim_nav_demo: VimNavDemoState,
 }

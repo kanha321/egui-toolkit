@@ -19,20 +19,30 @@ fn main() -> eframe::Result<()> {
         options,
         Box::new(|cc| {
             let mut fonts = egui::FontDefinitions::default();
+
+            // 1. Primary Text Font (JetBrains Mono)
             fonts.font_data.insert(
-                "jetbrains_mono_nf".to_owned(),
+                "jetbrains_mono".to_owned(),
                 egui::FontData::from_static(include_bytes!("../resources/JetBrainsMonoNerdFont-Regular.ttf")),
             );
-            fonts
-                .families
-                .get_mut(&egui::FontFamily::Proportional)
-                .unwrap()
-                .insert(0, "jetbrains_mono_nf".to_owned());
-            fonts
-                .families
-                .get_mut(&egui::FontFamily::Monospace)
-                .unwrap()
-                .insert(0, "jetbrains_mono_nf".to_owned());
+
+            // 2. Separate Dedicated Fallback Font for Nerd Font Symbols / Icons
+            fonts.font_data.insert(
+                "symbols_nerd_font".to_owned(),
+                egui::FontData::from_static(include_bytes!("../resources/SymbolsNerdFont-Regular.ttf")),
+            );
+
+            // Configure Proportional family: primary text font first, symbols fallback second
+            if let Some(vec) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+                vec.insert(0, "jetbrains_mono".to_owned());
+                vec.push("symbols_nerd_font".to_owned());
+            }
+
+            // Configure Monospace family: primary text font first, symbols fallback second
+            if let Some(vec) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
+                vec.insert(0, "jetbrains_mono".to_owned());
+                vec.push("symbols_nerd_font".to_owned());
+            }
 
             cc.egui_ctx.set_fonts(fonts);
 

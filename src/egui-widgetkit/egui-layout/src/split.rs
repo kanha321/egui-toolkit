@@ -1,26 +1,22 @@
 //! Declarative, responsive, constraint-aware nested split layouts for egui.
 
-use egui::{Align, Layout, Pos2, Rect, Response, Sense, Ui, Vec2};
+use egui::{Align, Color32, Layout, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui, Vec2};
+use crate::section::Section;
 use crate::size::Size;
 
 /// Layout axis for `Split`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Direction {
+pub enum Direction {
     /// Sections placed horizontally side-by-side (left to right).
     Horizontal,
     /// Sections stacked vertically (top to bottom).
     Vertical,
 }
 
-struct Section<'a> {
-    size: Size,
-    add_contents: Box<dyn FnOnce(&mut Ui) + 'a>,
-}
-
 /// A declarative builder for responsive, constraint-aware multi-section split layouts.
 ///
-/// Supports proportional fractions, fixed pixel sizes, minimum/maximum size constraints,
-/// and automatic remainder expansion.
+/// Supports proportional fractions, fixed pixel sizes, 2D minimum/maximum constraints,
+/// automatic remainder expansion, visual card framing, and automatic layout bounding.
 ///
 /// # State Ownership
 ///
@@ -29,7 +25,7 @@ struct Section<'a> {
 /// # Examples
 ///
 /// ```rust
-/// use egui_layout::Split;
+/// use egui_layout::{Split, Section};
 ///
 /// # egui::__run_test_ctx(|ctx| {
 /// # egui::CentralPanel::default().show(ctx, |ui| {
@@ -83,6 +79,18 @@ impl<'a> Split<'a> {
         self
     }
 
+    /// Appends a fully configured `Section` instance.
+    pub fn add_section(mut self, section: Section<'a>) -> Self {
+        self.sections.push(section);
+        self
+    }
+
+    /// Configures and adds a section via a builder closure.
+    pub fn section_with(mut self, build: impl FnOnce(Section<'a>) -> Section<'a>) -> Self {
+        self.sections.push(build(Section::new()));
+        self
+    }
+
     /// Adds a section with a relative fraction of available space.
     ///
     /// Fractions do not need to sum to `1.0`; they are normalized proportionally across flexible sections.
@@ -91,26 +99,22 @@ impl<'a> Split<'a> {
         fraction: f32,
         add_contents: impl FnOnce(&mut Ui) + 'a,
     ) -> Self {
-        self.sections.push(Section {
-            size: Size::fraction(fraction),
-            add_contents: Box::new(add_contents),
-        });
+        self.sections.push(Section::fraction(fraction).content(add_contents));
         self
     }
 
     /// Adds a fractional section with a minimum size constraint in logical points.
-    ///
-    /// The section scales proportionally in large windows, but will never shrink below `min_px`.
     pub fn section_min(
         mut self,
         fraction: f32,
         min_px: f32,
         add_contents: impl FnOnce(&mut Ui) + 'a,
     ) -> Self {
-        self.sections.push(Section {
-            size: Size::fraction(fraction).min_size(min_px),
-            add_contents: Box::new(add_contents),
-        });
+        self.sections.push(
+            Section::fraction(fraction)
+                .min_size(min_px)
+                .content(add_contents),
+        );
         self
     }
 
@@ -122,10 +126,12 @@ impl<'a> Split<'a> {
         max_px: f32,
         add_contents: impl FnOnce(&mut Ui) + 'a,
     ) -> Self {
-        self.sections.push(Section {
-            size: Size::fraction(fraction).min_size(min_px).max_size(max_px),
-            add_contents: Box::new(add_contents),
-        });
+        self.sections.push(
+            Section::fraction(fraction)
+                .min_size(min_px)
+                .max_size(max_px)
+                .content(add_contents),
+        );
         self
     }
 
@@ -135,10 +141,7 @@ impl<'a> Split<'a> {
         px: f32,
         add_contents: impl FnOnce(&mut Ui) + 'a,
     ) -> Self {
-        self.sections.push(Section {
-            size: Size::exact(px),
-            add_contents: Box::new(add_contents),
-        });
+        self.sections.push(Section::fixed(px).content(add_contents));
         self
     }
 
@@ -147,10 +150,7 @@ impl<'a> Split<'a> {
         mut self,
         add_contents: impl FnOnce(&mut Ui) + 'a,
     ) -> Self {
-        self.sections.push(Section {
-            size: Size::remainder(),
-            add_contents: Box::new(add_contents),
-        });
+        self.sections.push(Section::remainder().content(add_contents));
         self
     }
 
@@ -160,11 +160,64 @@ impl<'a> Split<'a> {
         size: Size,
         add_contents: impl FnOnce(&mut Ui) + 'a,
     ) -> Self {
-        self.sections.push(Section {
-            size,
-            add_contents: Box::new(add_contents),
-        });
+        self.sections.push(Section::new().size(size).content(add_contents));
         self
+    }
+
+    /// Adds a styled card section configured via a builder closure.
+    pub fn section_card(
+        mut self,
+        fraction: f32,
+        build: impl FnOnce(Section<'a>) -> Section<'a>,
+    ) -> Self {
+        let s = build(Section::fraction(fraction).card());
+        self.sections.push(s);
+        self
+    }
+
+    /// Generates `n` equal-width (or equal-height) sections using a generator closure.
+    pub fn sections_equal(
+        mut self,
+        n: usize,
+        add_content: impl Fn(usize, &mut Ui) + 'a + Clone,
+    ) -> Self {
+        if n == 0 {
+            return self;
+        }
+        let fraction = 1.0 / (n as f32);
+        for i in 0..n {
+            let add = add_content.clone();
+            self = self.section(fraction, move |ui| add(i, ui));
+        }
+        self
+    }
+
+    /// Generates multiple sections with specified proportional fractions.
+    pub fn sections_proportional(
+        mut self,
+        fractions: &[f32],
+        add_content: impl Fn(usize, f32, &mut Ui) + 'a + Clone,
+    ) -> Self {
+        for (i, &fraction) in fractions.iter().enumerate() {
+            let add = add_content.clone();
+            self = self.section(fraction, move |ui| add(i, fraction, ui));
+        }
+        self
+    }
+
+    /// Returns the number of sections currently added to this split.
+    pub fn len(&self) -> usize {
+        self.sections.len()
+    }
+
+    /// Returns whether this split currently has zero sections.
+    pub fn is_empty(&self) -> bool {
+        self.sections.is_empty()
+    }
+
+    /// Returns the layout direction of this split.
+    pub fn direction(&self) -> Direction {
+        self.direction
     }
 
     /// Calculates the minimum required length along the primary axis
@@ -172,6 +225,40 @@ impl<'a> Split<'a> {
     pub fn min_primary_length(&self) -> f32 {
         let policies: Vec<Size> = self.sections.iter().map(|s| s.size).collect();
         Self::compute_min_length(self.spacing, &policies)
+    }
+
+    /// Calculates the minimum required length along the cross axis across all sections.
+    pub fn min_cross_length(&self) -> f32 {
+        self.sections
+            .iter()
+            .map(|s| s.cross_min())
+            .fold(0.0_f32, |max, val| max.max(val))
+    }
+
+    /// Automatically computes the total 2D minimum dimensions (`Vec2`) required by this split layout tree.
+    pub fn min_size(&self) -> Vec2 {
+        match self.direction {
+            Direction::Horizontal => Vec2::new(self.min_primary_length(), self.min_cross_length()),
+            Direction::Vertical => Vec2::new(self.min_cross_length(), self.min_primary_length()),
+        }
+    }
+
+    /// Returns the minimum required width in logical points.
+    pub fn min_width(&self) -> f32 {
+        self.min_size().x
+    }
+
+    /// Returns the minimum required height in logical points.
+    pub fn min_height(&self) -> f32 {
+        self.min_size().y
+    }
+
+    /// One-liner to enforce the computed 2D minimum size on the active egui viewport window.
+    pub fn enforce_min_size(&self, ctx: &egui::Context) {
+        let min_size = self.min_size();
+        if min_size.x > 0.0 || min_size.y > 0.0 {
+            ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(min_size));
+        }
     }
 
     /// Calculates the minimum required length along the primary axis for a set of policies and spacing.
@@ -193,17 +280,12 @@ impl<'a> Split<'a> {
     }
 
     /// Resolves and calculates exact section lengths given available space and pure fraction weights.
-    ///
-    /// Maintained for backwards compatibility and pure fractional layouts.
     pub fn compute_sizes(available_length: f32, spacing: f32, fractions: &[f32]) -> Vec<f32> {
         let policies: Vec<Size> = fractions.iter().map(|&f| Size::fraction(f)).collect();
         Self::compute_sizes_with_policy(available_length, spacing, &policies)
     }
 
     /// Resolves and calculates exact section lengths using the constraint solver.
-    ///
-    /// Handles fixed sizes, fractional distributions, min/max bounds, graceful fallbacks,
-    /// and sub-pixel float rounding remainder absorption.
     pub fn compute_sizes_with_policy(
         available_length: f32,
         spacing: f32,
@@ -356,10 +438,7 @@ impl<'a> Split<'a> {
                         Vec2::new(w, total_rect.height()),
                     );
 
-                    let mut child_ui = ui.child_ui(section_rect, Layout::top_down(Align::Min));
-                    child_ui.set_clip_rect(child_ui.clip_rect().intersect(section_rect));
-                    (section.add_contents)(&mut child_ui);
-
+                    Self::render_section_slot(ui, section_rect, section);
                     current_x += w + self.spacing;
                 }
             }
@@ -372,15 +451,56 @@ impl<'a> Split<'a> {
                         Vec2::new(total_rect.width(), h),
                     );
 
-                    let mut child_ui = ui.child_ui(section_rect, Layout::top_down(Align::Min));
-                    child_ui.set_clip_rect(child_ui.clip_rect().intersect(section_rect));
-                    (section.add_contents)(&mut child_ui);
-
+                    Self::render_section_slot(ui, section_rect, section);
                     current_y += h + self.spacing;
                 }
             }
         }
 
         response
+    }
+
+    fn render_section_slot(ui: &mut Ui, section_rect: Rect, section: Section<'a>) {
+        if let Some(on_rect) = section.on_rect {
+            on_rect(section_rect);
+        }
+
+        if section.is_card {
+            if section_rect.width() <= 0.0 || section_rect.height() <= 0.0 {
+                return;
+            }
+
+            let bg = section.bg.unwrap_or(Color32::from_rgb(30, 32, 48));
+            let stroke = section.stroke.unwrap_or(Stroke::new(1.0, Color32::from_rgb(60, 64, 82)));
+            let rounding = section.rounding.unwrap_or(Rounding::same(8.0));
+
+            // Guaranteed intact 4 rounded corners
+            ui.painter().rect(section_rect, rounding, bg, stroke);
+
+            let padding = section.padding.unwrap_or(8.0);
+            let content_rect = section_rect.shrink(padding);
+
+            if content_rect.width() > 0.0 && content_rect.height() > 0.0 {
+                let mut child_ui = ui.child_ui(content_rect, Layout::top_down(Align::Min));
+                child_ui.set_clip_rect(child_ui.clip_rect().intersect(content_rect));
+
+                if let Some(title) = &section.title {
+                    let title_color = section.title_color.unwrap_or(Color32::from_rgb(137, 180, 250));
+                    child_ui.colored_label(title_color, egui::RichText::new(title).strong().size(13.0));
+                }
+
+                if let Some(subtitle) = &section.subtitle {
+                    if content_rect.height() > 28.0 {
+                        child_ui.label(egui::RichText::new(subtitle).size(10.5).color(Color32::from_rgb(166, 173, 200)));
+                    }
+                }
+
+                (section.add_contents)(&mut child_ui);
+            }
+        } else {
+            let mut child_ui = ui.child_ui(section_rect, Layout::top_down(Align::Min));
+            child_ui.set_clip_rect(child_ui.clip_rect().intersect(section_rect));
+            (section.add_contents)(&mut child_ui);
+        }
     }
 }

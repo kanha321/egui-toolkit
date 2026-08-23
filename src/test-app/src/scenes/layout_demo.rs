@@ -1,145 +1,122 @@
-use egui::{Color32, Rounding, Stroke, Ui, Vec2};
-use egui_layout::{Size, Split};
+use egui::{Color32, Stroke, Ui, Vec2};
+use egui_layout::{Section, Split};
 
-/// Spacing between split sections in logical points.
+/// Inter-section spacing in logical points.
 const SECTION_SPACING: f32 = 6.0;
-
-/// Sidebar sizing policy: 24% width, minimum 150pt.
-const SIDEBAR_SIZE: Size = Size::Fraction {
-    fraction: 0.24,
-    min: Some(150.0),
-    max: None,
-};
-
-/// Top Command Ribbon sizing policy: fixed 48pt height.
-const RIBBON_SIZE: Size = Size::Exact(48.0);
-
-/// Inspector sizing policy: 35% width, minimum 160pt.
-const INSPECTOR_SIZE: Size = Size::Fraction {
-    fraction: 0.35,
-    min: Some(160.0),
-    max: None,
-};
-
-/// Canvas minimum size constraints.
-const CANVAS_MIN_WIDTH: f32 = 140.0;
-const CANVAS_MIN_HEIGHT: f32 = 80.0;
 
 /// Dynamically calculates the minimum window dimensions required to satisfy all nested section constraints.
 pub fn min_layout_size() -> Vec2 {
-    // Width: Sidebar + Spacing + (Canvas min + Spacing + Inspector min)
-    let workspace_min_w = Split::compute_min_length(
-        SECTION_SPACING,
-        &[
-            Size::remainder().min_size(CANVAS_MIN_WIDTH),
-            INSPECTOR_SIZE,
-        ],
-    );
-    let total_min_w = Split::compute_min_length(
-        SECTION_SPACING,
-        &[
-            SIDEBAR_SIZE,
-            Size::remainder().min_size(workspace_min_w),
-        ],
-    );
+    // Automatically computed using the declarative 2D constraint tree
+    let inner_workspace = Split::horizontal()
+        .spacing(SECTION_SPACING)
+        .add_section(Section::remainder().min_size_2d(140.0, 80.0))
+        .add_section(Section::fraction(0.35).min_size_2d(160.0, 80.0));
 
-    // Height: Ribbon + Spacing + Canvas min height + Top Navigation Bar (~36pt) + Padding (~24pt)
-    let total_min_h = Split::compute_min_length(
-        SECTION_SPACING,
-        &[
-            RIBBON_SIZE,
-            Size::remainder().min_size(CANVAS_MIN_HEIGHT),
-        ],
-    ) + 60.0; // Margin + Top panel overhead
+    let right_area = Split::vertical()
+        .spacing(SECTION_SPACING)
+        .add_section(Section::fixed(48.0).min_cross(200.0))
+        .add_section(Section::remainder().min_size_2d(inner_workspace.min_width(), inner_workspace.min_height()));
 
-    Vec2::new(total_min_w + 24.0, total_min_h)
+    let full_layout = Split::horizontal()
+        .spacing(SECTION_SPACING)
+        .add_section(Section::fraction(0.24).min_size_2d(150.0, 150.0))
+        .add_section(Section::remainder().min_size_2d(right_area.min_width(), right_area.min_height()));
+
+    let min_bounds = full_layout.min_size();
+    Vec2::new(min_bounds.x + 24.0, min_bounds.y + 60.0)
 }
 
 pub fn show(ui: &mut Ui) {
     Split::horizontal()
         .spacing(SECTION_SPACING)
         // Section 1: Navigation / Explorer (Left column)
-        .section_custom(SIDEBAR_SIZE, |ui| {
-            draw_section_card(
-                ui,
-                "📁 Project Explorer",
-                "Section 1 • Left (24% min 150pt)",
-                Color32::from_rgb(30, 32, 48),
-                Color32::from_rgb(137, 180, 250),
-            );
-        })
+        .add_section(
+            Section::fraction(0.24)
+                .min_size_2d(150.0, 150.0)
+                .card()
+                .title("📁 Project Explorer")
+                .subtitle("Section 1 • Left (24% min 150pt)")
+                .title_color(Color32::from_rgb(137, 180, 250))
+                .bg(Color32::from_rgb(30, 32, 48))
+                .stroke(Stroke::new(1.0, Color32::from_rgb(69, 71, 90)))
+                .padding(10.0)
+                .content(|ui| {
+                    ui.separator();
+                    ui.label("📁 src/");
+                    ui.label("  📄 lib.rs");
+                    ui.label("  📄 split.rs");
+                    ui.label("  📄 section.rs");
+                    ui.label("  📄 size.rs");
+                }),
+        )
         // Right Area containing Sections 2, 3, and 4
-        .section_remainder(|ui| {
-            Split::vertical()
-                .spacing(SECTION_SPACING)
-                // Section 2: Top Command Ribbon
-                .section_custom(RIBBON_SIZE, |ui| {
-                    draw_section_card(
-                        ui,
-                        "⚡ Command Ribbon",
-                        "Section 2 • Top (Fixed 48pt)",
-                        Color32::from_rgb(36, 39, 58),
-                        Color32::from_rgb(166, 227, 161),
-                    );
-                })
-                // Middle area split horizontally into Canvas & Inspector
-                .section_remainder(|ui| {
-                    Split::horizontal()
-                        .spacing(SECTION_SPACING)
-                        // Section 3: Central Canvas / Viewport (Flexible remainder)
-                        .section_remainder(|ui| {
-                            draw_section_card(
-                                ui,
-                                "🎨 Design Canvas / Viewport",
-                                "Section 3 • Center (Flexible Remainder)",
-                                Color32::from_rgb(24, 25, 38),
-                                Color32::from_rgb(203, 166, 247),
-                            );
-                        })
-                        // Section 4: Property Inspector (Right column)
-                        .section_custom(INSPECTOR_SIZE, |ui| {
-                            draw_section_card(
-                                ui,
-                                "⚙️ Property Inspector",
-                                "Section 4 • Right (35% min 160pt)",
-                                Color32::from_rgb(32, 34, 52),
-                                Color32::from_rgb(249, 226, 175),
-                            );
-                        })
-                        .show(ui);
-                })
-                .show(ui);
-        })
+        .add_section(
+            Section::remainder().content(|ui| {
+                Split::vertical()
+                    .spacing(SECTION_SPACING)
+                    // Section 2: Top Command Ribbon (Fixed 48pt height)
+                    .add_section(
+                        Section::fixed(48.0)
+                            .min_cross(200.0)
+                            .card()
+                            .title("⚡ Command Ribbon")
+                            .subtitle("Section 2 • Top (Fixed 48pt)")
+                            .title_color(Color32::from_rgb(166, 227, 161))
+                            .bg(Color32::from_rgb(36, 39, 58))
+                            .stroke(Stroke::new(1.0, Color32::from_rgb(69, 71, 90)))
+                            .padding(8.0)
+                            .content(|ui| {
+                                ui.horizontal(|ui| {
+                                    if ui.button("▶ Run").clicked() {}
+                                    if ui.button("⏸ Pause").clicked() {}
+                                    if ui.button("🔄 Reload").clicked() {}
+                                });
+                            }),
+                    )
+                    // Middle area split horizontally into Canvas & Inspector
+                    .add_section(
+                        Section::remainder().content(|ui| {
+                            Split::horizontal()
+                                .spacing(SECTION_SPACING)
+                                // Section 3: Central Canvas / Viewport (Flexible remainder)
+                                .add_section(
+                                    Section::remainder()
+                                        .min_size_2d(140.0, 80.0)
+                                        .card()
+                                        .title("🎨 Design Canvas / Viewport")
+                                        .subtitle("Section 3 • Center (Flexible Remainder)")
+                                        .title_color(Color32::from_rgb(203, 166, 247))
+                                        .bg(Color32::from_rgb(24, 25, 38))
+                                        .stroke(Stroke::new(1.0, Color32::from_rgb(69, 71, 90)))
+                                        .padding(10.0)
+                                        .content(|ui| {
+                                            ui.separator();
+                                            ui.label("Interactive visual canvas area.");
+                                            ui.label("Auto-expands to fill all remaining space.");
+                                        }),
+                                )
+                                // Section 4: Property Inspector (Right column)
+                                .add_section(
+                                    Section::fraction(0.35)
+                                        .min_size_2d(160.0, 80.0)
+                                        .card()
+                                        .title("⚙️ Property Inspector")
+                                        .subtitle("Section 4 • Right (35% min 160pt)")
+                                        .title_color(Color32::from_rgb(249, 226, 175))
+                                        .bg(Color32::from_rgb(32, 34, 52))
+                                        .stroke(Stroke::new(1.0, Color32::from_rgb(69, 71, 90)))
+                                        .padding(10.0)
+                                        .content(|ui| {
+                                            ui.separator();
+                                            ui.label("Width constraint: 35% flex");
+                                            ui.label("Minimum width: 160pt");
+                                        }),
+                                )
+                                .show(ui);
+                        }),
+                    )
+                    .show(ui);
+            }),
+        )
         .show(ui);
-}
-
-fn draw_section_card(ui: &mut Ui, title: &str, subtitle: &str, bg: Color32, accent: Color32) {
-    let available_rect = ui.available_rect_before_wrap();
-    if available_rect.width() <= 0.0 || available_rect.height() <= 0.0 {
-        return;
-    }
-
-    // Always render the card background and border with all 4 rounded corners intact
-    ui.painter().rect(
-        available_rect,
-        Rounding::same(8.0),
-        bg,
-        Stroke::new(1.0, Color32::from_rgb(69, 71, 90)),
-    );
-
-    // Inner content area with inset margin
-    let content_rect = available_rect.shrink(10.0);
-    if content_rect.width() > 0.0 && content_rect.height() > 0.0 {
-        let mut child_ui = ui.child_ui(content_rect, egui::Layout::top_down(egui::Align::Min));
-        child_ui.set_clip_rect(child_ui.clip_rect().intersect(content_rect));
-
-        child_ui.colored_label(accent, egui::RichText::new(title).strong().size(13.0));
-        if content_rect.height() > 24.0 {
-            child_ui.label(egui::RichText::new(subtitle).size(10.5).color(Color32::from_rgb(166, 173, 200)));
-        }
-        if content_rect.height() > 44.0 {
-            child_ui.separator();
-            child_ui.label(format!("Size: {:.0} x {:.0} pt", available_rect.width(), available_rect.height()));
-        }
-    }
 }

@@ -8,9 +8,10 @@ use egui_layout::Split;
 use egui_spring::SpringRect;
 use spring_core::{Spring, SpringParams};
 
-/// The 5 available spring animation presets.
+/// The available spring animation presets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum HighlightPreset {
+    Off,
     Gentle,
     Snappy,
     #[default]
@@ -86,28 +87,76 @@ impl SpringDemoState {
         let dt = raw_dt * self.speed_scale;
         self.custom_spring.params = SpringParams::new(self.custom_frequency, self.custom_damping);
 
-        // Sync active highlight preset parameters and matching colors
-        let (stiffness, damping, accent_color) = match self.highlight_preset {
-            HighlightPreset::Gentle => (18.0, 0.90, Color32::from_rgb(203, 166, 247)),
-            HighlightPreset::Snappy => (32.0, 0.85, Color32::from_rgb(166, 227, 161)),
-            HighlightPreset::Preferred => (20.0, 0.50, Color32::from_rgb(0, 255, 136)),
-            HighlightPreset::OpenRGB => (22.0, 0.65, Color32::from_rgb(137, 180, 250)),
-            HighlightPreset::Custom => (
-                self.custom_frequency,
-                self.custom_damping,
-                Color32::from_rgb(137, 220, 235),
-            ),
+        // Sync active highlight preset parameters and matching colors using public API
+        match self.highlight_preset {
+            HighlightPreset::Off => {
+                self.selection_highlight.set_motion(spring_core::MotionPhysics::Off);
+                let accent_color = Color32::from_rgb(180, 190, 205);
+                self.selection_highlight.set_stroke(Stroke::new(1.5, accent_color));
+                self.selection_highlight.set_fill(Color32::from_rgba_unmultiplied(
+                    accent_color.r(),
+                    accent_color.g(),
+                    accent_color.b(),
+                    14,
+                ));
+            }
+            HighlightPreset::Gentle => {
+                self.selection_highlight.set_motion(spring_core::MotionPhysics::Gentle);
+                let accent_color = Color32::from_rgb(203, 166, 247);
+                self.selection_highlight.set_stroke(Stroke::new(1.5, accent_color));
+                self.selection_highlight.set_fill(Color32::from_rgba_unmultiplied(
+                    accent_color.r(),
+                    accent_color.g(),
+                    accent_color.b(),
+                    14,
+                ));
+            }
+            HighlightPreset::Snappy => {
+                self.selection_highlight.set_motion(spring_core::MotionPhysics::Snappy);
+                let accent_color = Color32::from_rgb(166, 227, 161);
+                self.selection_highlight.set_stroke(Stroke::new(1.5, accent_color));
+                self.selection_highlight.set_fill(Color32::from_rgba_unmultiplied(
+                    accent_color.r(),
+                    accent_color.g(),
+                    accent_color.b(),
+                    14,
+                ));
+            }
+            HighlightPreset::Preferred => {
+                self.selection_highlight.set_motion(spring_core::MotionPhysics::Default);
+                let accent_color = Color32::from_rgb(0, 255, 136);
+                self.selection_highlight.set_stroke(Stroke::new(1.5, accent_color));
+                self.selection_highlight.set_fill(Color32::from_rgba_unmultiplied(
+                    accent_color.r(),
+                    accent_color.g(),
+                    accent_color.b(),
+                    14,
+                ));
+            }
+            HighlightPreset::OpenRGB => {
+                self.selection_highlight.set_motion(spring_core::MotionPhysics::OpenRGB);
+                let accent_color = Color32::from_rgb(137, 180, 250);
+                self.selection_highlight.set_stroke(Stroke::new(1.5, accent_color));
+                self.selection_highlight.set_fill(Color32::from_rgba_unmultiplied(
+                    accent_color.r(),
+                    accent_color.g(),
+                    accent_color.b(),
+                    14,
+                ));
+            }
+            HighlightPreset::Custom => {
+                let params = SpringParams::new(self.custom_frequency, self.custom_damping);
+                self.selection_highlight.set_params(params);
+                let accent_color = Color32::from_rgb(137, 220, 235);
+                self.selection_highlight.set_stroke(Stroke::new(1.5, accent_color));
+                self.selection_highlight.set_fill(Color32::from_rgba_unmultiplied(
+                    accent_color.r(),
+                    accent_color.g(),
+                    accent_color.b(),
+                    14,
+                ));
+            }
         };
-
-        self.selection_highlight.corners.base_stiffness = stiffness;
-        self.selection_highlight.corners.base_damping = damping;
-        self.selection_highlight.stroke.color = accent_color;
-        self.selection_highlight.fill_color = Color32::from_rgba_unmultiplied(
-            accent_color.r(),
-            accent_color.g(),
-            accent_color.b(),
-            14,
-        );
 
         self.gentle_spring.update(dt);
         self.snappy_spring.update(dt);
@@ -200,6 +249,7 @@ pub fn show(ui: &mut Ui, state: &mut SpringDemoState) {
                     ui.selectable_value(highlight_preset, HighlightPreset::Gentle, "Gentle");
                     ui.selectable_value(highlight_preset, HighlightPreset::OpenRGB, "OpenRGB");
                     ui.selectable_value(highlight_preset, HighlightPreset::Custom, "Custom");
+                    ui.selectable_value(highlight_preset, HighlightPreset::Off, "Off (Instant)");
                 });
 
                 ui.add_space(8.0);

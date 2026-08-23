@@ -1,7 +1,7 @@
 //! Spring-animated highlight widget emitting pure `egui::Shape` primitives.
 
 use egui::{Color32, Painter, Pos2, Rect, Response, Rounding, Sense, Shape, Stroke, Ui, Vec2};
-use spring_core::{Spring, SpringParams};
+use spring_core::{MotionPhysics, Spring, SpringParams};
 
 use crate::bezier::{build_bezier_boundary, DEFAULT_ARC_SEGMENTS};
 use crate::corner_springs::CornerSprings;
@@ -15,6 +15,8 @@ use crate::corner_springs::CornerSprings;
 /// across frames (`CODING_RULES §2`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct SpringRect {
+    /// Active motion physics mode (presets, custom, or `Off`).
+    pub motion: MotionPhysics,
     /// 4-corner analytical spring bundle.
     pub corners: CornerSprings,
     /// Alpha opacity fade-in spring.
@@ -44,11 +46,14 @@ impl Default for SpringRect {
 }
 
 impl SpringRect {
-    /// Creates a new `SpringRect` initialized to `target_rect` with OpenRGB/Neovide defaults.
+    /// Creates a new `SpringRect` initialized to `target_rect` with default spring dynamics.
     pub fn new(target_rect: Rect) -> Self {
         let default_rounding = Rounding::same(6.0);
+        let default_motion = MotionPhysics::Default;
+        let default_params = default_motion.to_params().unwrap_or_default();
         Self {
-            corners: CornerSprings::new(target_rect, 22.0, 0.65),
+            motion: default_motion,
+            corners: CornerSprings::new(target_rect, default_params.angular_frequency, default_params.damping_ratio),
             alpha_spring: Spring::new(1.0, SpringParams::new(24.0, 0.75)),
             fill_color: Color32::from_rgba_unmultiplied(0, 255, 136, 14),
             stroke: Stroke::new(1.5, Color32::from_rgb(0, 255, 136)),
@@ -61,11 +66,95 @@ impl SpringRect {
         }
     }
 
+    /// Creates a new `SpringRect` configured with the provided `HighlightConfig`.
+    pub fn from_config(target_rect: Rect, config: &crate::config::HighlightConfig) -> Self {
+        let mut rect = Self::new(target_rect);
+        rect.apply_config(config);
+        rect
+    }
+
+    /// Applies a `HighlightConfig` directly to this `SpringRect`.
+    pub fn apply_config(&mut self, config: &crate::config::HighlightConfig) {
+        self.set_motion(config.motion);
+        self.fill_color = config.fill;
+        self.stroke = config.stroke;
+        self.target_rounding = config.rounding;
+        self.current_rounding = config.rounding;
+        self.start_rounding = config.rounding;
+        self.padding = config.padding;
+    }
+
+    /// Exports the current styling and motion parameters as a `HighlightConfig`.
+    pub fn to_config(&self) -> crate::config::HighlightConfig {
+        crate::config::HighlightConfig {
+            motion: self.motion,
+            fill: self.fill_color,
+            stroke: self.stroke,
+            rounding: self.target_rounding,
+            padding: self.padding,
+        }
+    }
+
+    /// Creates an instant highlight with motion physics turned `Off`.
+    pub fn off(target_rect: Rect) -> Self {
+        Self::new(target_rect).with_motion(MotionPhysics::Off)
+    }
+
+    /// Creates a highlight configured with the `Gentle` spring preset.
+    pub fn gentle(target_rect: Rect) -> Self {
+        Self::new(target_rect).with_motion(MotionPhysics::Gentle)
+    }
+
+    /// Creates a highlight configured with the `Snappy` spring preset.
+    pub fn snappy(target_rect: Rect) -> Self {
+        Self::new(target_rect).with_motion(MotionPhysics::Snappy)
+    }
+
+    /// Creates a highlight configured with the `Bouncy` spring preset.
+    pub fn bouncy(target_rect: Rect) -> Self {
+        Self::new(target_rect).with_motion(MotionPhysics::Bouncy)
+    }
+
+    /// Creates a highlight configured with the `OpenRGB` spring preset.
+    pub fn openrgb(target_rect: Rect) -> Self {
+        Self::new(target_rect).with_motion(MotionPhysics::OpenRGB)
+    }
+
+    /// Sets the motion physics mode (e.g. `MotionPhysics::Gentle`, `MotionPhysics::Snappy`, `MotionPhysics::Off`).
+    pub fn with_motion(mut self, motion: MotionPhysics) -> Self {
+        self.set_motion(motion);
+        self
+    }
+
+    /// Dynamically updates the motion physics mode at runtime.
+    pub fn set_motion(&mut self, motion: MotionPhysics) {
+        self.motion = motion;
+        if let Some(params) = motion.to_params() {
+            self.corners.base_stiffness = params.angular_frequency;
+            self.corners.base_damping = params.damping_ratio;
+        } else {
+            // When Off, instantly snap to current target rect and rounding
+            let target = self.corners.target_rect;
+            self.corners.reset(target);
+            self.start_center = target.center();
+            self.target_center = target.center();
+            self.current_rounding = self.target_rounding;
+            self.start_rounding = self.target_rounding;
+            self.alpha_spring.reset(1.0);
+        }
+    }
+
     /// Sets the base physical spring dynamics parameters.
     pub fn with_params(mut self, params: SpringParams) -> Self {
+        self.set_params(params);
+        self
+    }
+
+    /// Dynamically updates the spring physical parameters at runtime.
+    pub fn set_params(&mut self, params: SpringParams) {
         self.corners.base_stiffness = params.angular_frequency;
         self.corners.base_damping = params.damping_ratio;
-        self
+        self.motion = MotionPhysics::Custom(params);
     }
 
     /// Sets the fill color.
@@ -74,10 +163,20 @@ impl SpringRect {
         self
     }
 
+    /// Dynamically updates the fill color at runtime.
+    pub fn set_fill(&mut self, fill: Color32) {
+        self.fill_color = fill;
+    }
+
     /// Sets the border stroke.
     pub fn with_stroke(mut self, stroke: Stroke) -> Self {
         self.stroke = stroke;
         self
+    }
+
+    /// Dynamically updates the border stroke at runtime.
+    pub fn set_stroke(&mut self, stroke: Stroke) {
+        self.stroke = stroke;
     }
 
     /// Sets uniform corner rounding radius.
@@ -103,6 +202,11 @@ impl SpringRect {
         self
     }
 
+    /// Dynamically updates the padding expansion at runtime.
+    pub fn set_padding(&mut self, padding: f32) {
+        self.padding = padding;
+    }
+
     /// Retargets the spring highlight to a new bounding rectangle.
     pub fn set_target(&mut self, target: Rect) {
         self.set_target_with_corner_rounding(target, self.target_rounding);
@@ -116,6 +220,19 @@ impl SpringRect {
     /// Retargets the spring highlight with asymmetric per-corner rounding for morphing.
     pub fn set_target_with_corner_rounding(&mut self, target: Rect, rounding: Rounding) {
         let padded = target.expand(self.padding);
+
+        if self.motion.is_off() {
+            self.corners.reset(padded);
+            self.corners.target_rect = padded;
+            self.target_rounding = rounding;
+            self.current_rounding = rounding;
+            self.start_rounding = rounding;
+            self.start_center = padded.center();
+            self.target_center = padded.center();
+            self.alpha_spring.reset(1.0);
+            return;
+        }
+
         let new_target_center = padded.center();
 
         let center_delta = (new_target_center - self.target_center).length();
@@ -153,6 +270,14 @@ impl SpringRect {
 
     /// Advances the spring physics by delta time `dt`.
     pub fn update(&mut self, dt: f32) {
+        if self.motion.is_off() {
+            let padded_target = self.corners.target_rect;
+            self.corners.reset(padded_target);
+            self.current_rounding = self.target_rounding;
+            self.alpha_spring.reset(1.0);
+            return;
+        }
+
         let padded_target = self.corners.target_rect;
         self.corners.update(padded_target, dt);
         self.alpha_spring.update(dt);
@@ -177,7 +302,11 @@ impl SpringRect {
 
     /// Checks if the animated highlight has settled at its target position.
     pub fn is_settled(&self) -> bool {
-        self.corners.is_settled() && self.alpha_spring.is_settled()
+        if self.motion.is_off() {
+            true
+        } else {
+            self.corners.is_settled() && self.alpha_spring.is_settled()
+        }
     }
 
     /// Returns the current bounding rect formed by the animated corner positions.

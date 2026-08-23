@@ -26,8 +26,10 @@
 //! # });
 //! ```
 
+pub mod section;
 pub mod size;
 pub mod split;
 
+pub use section::Section;
 pub use size::Size;
 pub use split::Split;

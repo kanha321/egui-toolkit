@@ -73,3 +73,81 @@ fn test_spring_rect_bounding_rect() {
     assert!((bbox.min.x - target.min.x).abs() < 1e-3);
     assert!((bbox.max.x - target.max.x).abs() < 1e-3);
 }
+
+#[test]
+fn test_spring_rect_motion_physics_off() {
+    let target1 = Rect::from_min_size(Pos2::new(0.0, 0.0), egui::vec2(50.0, 50.0));
+    let target2 = Rect::from_min_size(Pos2::new(200.0, 300.0), egui::vec2(100.0, 80.0));
+
+    let mut rect = SpringRect::off(target1).with_padding(0.0);
+    assert!(rect.is_settled(), "Off highlight must be settled immediately");
+
+    // Retargeting when Off must immediately update bounds without needing animation steps
+    rect.set_target(target2);
+    assert!(rect.is_settled(), "Off highlight must stay settled when retargeted");
+    let bbox = rect.current_bounding_rect();
+    assert!((bbox.min.x - target2.min.x).abs() < 1e-3);
+    assert!((bbox.min.y - target2.min.y).abs() < 1e-3);
+    assert!((bbox.max.x - target2.max.x).abs() < 1e-3);
+    assert!((bbox.max.y - target2.max.y).abs() < 1e-3);
+}
+
+#[test]
+fn test_highlight_group_independent_settings() {
+    use egui::{Color32, Stroke};
+    use egui_spring::{HighlightConfig, HighlightGroup, MotionPhysics};
+
+    let mut group: HighlightGroup<&'static str> = HighlightGroup::new();
+
+    // Layer 1: Gentle Blue outer panel
+    group.add(
+        "outer",
+        HighlightConfig::new()
+            .with_motion(MotionPhysics::Gentle)
+            .with_stroke(Stroke::new(2.0, Color32::BLUE))
+            .with_padding(4.0),
+    );
+
+    // Layer 2: Snappy Green item
+    group.add(
+        "inner",
+        HighlightConfig::new()
+            .with_motion(MotionPhysics::Snappy)
+            .with_stroke(Stroke::new(1.5, Color32::GREEN))
+            .with_padding(2.0),
+    );
+
+    // Layer 3: Instant/Off Yellow cursor
+    group.add(
+        "cursor",
+        HighlightConfig::new()
+            .with_motion(MotionPhysics::Off)
+            .with_stroke(Stroke::new(1.0, Color32::YELLOW)),
+    );
+
+    assert_eq!(group.len(), 3);
+    assert_eq!(group.get(&"outer").unwrap().motion, MotionPhysics::Gentle);
+    assert_eq!(group.get(&"inner").unwrap().motion, MotionPhysics::Snappy);
+    assert_eq!(group.get(&"cursor").unwrap().motion, MotionPhysics::Off);
+
+    // Retarget all independently
+    let r1 = Rect::from_min_size(Pos2::new(0.0, 0.0), egui::vec2(300.0, 300.0));
+    let r2 = Rect::from_min_size(Pos2::new(10.0, 10.0), egui::vec2(80.0, 40.0));
+    let r3 = Rect::from_min_size(Pos2::new(50.0, 20.0), egui::vec2(20.0, 20.0));
+
+    group.set_target(&"outer", r1);
+    group.set_target(&"inner", r2);
+    group.set_target(&"cursor", r3);
+
+    // Cursor is Off, so it's settled immediately
+    assert!(group.get(&"cursor").unwrap().is_settled());
+
+    // Update group by 600 steps to let all settle
+    let mut steps = 0;
+    while !group.is_settled() && steps < 600 {
+        group.update(1.0 / 60.0);
+        steps += 1;
+    }
+
+    assert!(group.is_settled(), "All independent highlights must settle");
+}
