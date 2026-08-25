@@ -12,5 +12,6 @@ egui-spring    = { path = "../egui-widgetkit/egui-spring" }
 egui-vim-nav   = { path = "../egui-widgetkit/egui-vim-nav" }
 egui-nav-stack = { path = "../egui-widgetkit/egui-nav-stack", features = ["animated-transitions"] }
 egui-themes    = { path = "../egui-widgetkit/egui-themes" }
+egui-widgets   = { path = "../egui-widgetkit/egui-widgets" }
 eframe         = { workspace = true }
 egui           = { workspace = true }

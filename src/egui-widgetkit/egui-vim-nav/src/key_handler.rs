@@ -1,9 +1,9 @@
 //! Vim-style key handler mapping HJKL, arrow keys, Ctrl+HJKL for sections, and action keys (F/Enter, D, Q/Esc, Mouse Back/Forward).
 //!
 //! [`VimKeyHandler`] reads egui input state and produces navigation events and
-//! action events, gated by [`ctx.wants_keyboard_input()`](egui::Context::wants_keyboard_input)
-//! so that navigation/action keypresses are not consumed when a text field has focus
-//! (per `BUILD_PLAN.md` §4.3).
+//! action events. Key reads are **unconditional** — they always fire regardless
+//! of egui's internal text-input focus. The application layer is responsible for
+//! suppressing navigation when the user is actively typing in a text field.
 //!
 //! # State ownership
 //!
@@ -112,30 +112,36 @@ impl VimKeyHandler {
     ///
     /// Returns a [`FocusEvent`] if focus actually changed, or `None` if no
     /// navigation key was pressed, a text field has focus, or focus couldn't
-    /// move (e.g. at a graph edge).
+    /// Reads the current frame's input and returns the requested navigation direction (without Ctrl).
     ///
-    /// # Input guard
-    ///
-    /// This method checks [`ctx.wants_keyboard_input()`] before processing
-    /// letter keys. When a `TextEdit` or other text-input widget has focus,
-    /// all letter keys are passed through to the widget instead of being
-    /// consumed by navigation.
-    pub fn handle_input<T: Clone + Eq + Hash + Debug>(
-        &self,
-        ctx: &Context,
-        nav: &mut Navigator<T>,
-        graph: &FocusGraph<T>,
-    ) -> Option<FocusEvent<T>> {
-        let text_input_active = ctx.wants_keyboard_input();
-
-        let dir = ctx.input(|i| {
+    /// **HJKL and Arrow keys are always read** from egui input regardless of text-input focus.
+    /// If you have text input widgets, suppress navigation at the call site when the user
+    /// is actively typing (e.g. using a `text_field_focused` boolean set from the `TextEdit` response).
+    pub fn get_nav_direction(&self, ctx: &Context) -> Option<Direction> {
+        ctx.input(|i| {
             // Standard intra-section navigation (only without Ctrl)
             if i.modifiers.ctrl {
                 return None;
             }
 
-            // HJKL — only when no text input is active
-            if self.hjkl_enabled && !text_input_active {
+            // Tab / Shift+Tab — mapped to Right / Left (only if explicitly enabled)
+            if self.tab_enabled {
+                if i.key_pressed(egui::Key::Tab) {
+                    if i.modifiers.shift {
+                        return Some(Direction::Left);
+                    } else {
+                        return Some(Direction::Right);
+                    }
+                }
+            }
+
+            // Shift modifier is reserved for element-specific actions (e.g. Shift+H/L slider steps)
+            if i.modifiers.shift {
+                return None;
+            }
+
+            // HJKL
+            if self.hjkl_enabled {
                 if i.key_pressed(egui::Key::H) {
                     return Some(Direction::Left);
                 }
@@ -150,7 +156,7 @@ impl VimKeyHandler {
                 }
             }
 
-            // Arrow keys — always active (standard navigation even in text)
+            // Arrow keys
             if self.arrows_enabled {
                 if i.key_pressed(egui::Key::ArrowLeft) {
                     return Some(Direction::Left);
@@ -166,21 +172,22 @@ impl VimKeyHandler {
                 }
             }
 
-            // Tab / Shift+Tab — mapped to Right / Left (only if explicitly enabled)
-            if self.tab_enabled {
-                if i.key_pressed(egui::Key::Tab) {
-                    if i.modifiers.shift {
-                        return Some(Direction::Left);
-                    } else {
-                        return Some(Direction::Right);
-                    }
-                }
-            }
-
             None
-        });
+        })
+    }
 
-        dir.and_then(|d| nav.move_focus(graph, d))
+    /// Reads the current frame's input and moves focus within the given focus graph
+    /// if a standard navigation key (`HJKL` or `Arrows` without Ctrl) was pressed.
+    ///
+    /// Returns a [`FocusEvent`] if focus actually changed, or `None` if no
+    /// navigation key was pressed or focus couldn't move (e.g. at a graph edge).
+    pub fn handle_input<T: Clone + Eq + Hash + Debug>(
+        &self,
+        ctx: &Context,
+        nav: &mut Navigator<T>,
+        graph: &FocusGraph<T>,
+    ) -> Option<FocusEvent<T>> {
+        self.get_nav_direction(ctx).and_then(|d| nav.move_focus(graph, d))
     }
 
     /// Reads the current frame's input and checks for section navigation keys
@@ -192,14 +199,12 @@ impl VimKeyHandler {
             return None;
         }
 
-        let text_input_active = ctx.wants_keyboard_input();
-
         ctx.input(|i| {
             if !i.modifiers.ctrl {
                 return None;
             }
 
-            if self.hjkl_enabled && !text_input_active {
+            if self.hjkl_enabled {
                 if i.key_pressed(egui::Key::H) {
                     return Some(Direction::Left);
                 }
@@ -250,8 +255,9 @@ impl VimKeyHandler {
     /// - `PointerButton::Extra1` (Lower Thumb) -> `VimAction::Back`
     /// - `PointerButton::Extra2` (Upper Thumb) -> `VimAction::Forward`
     ///
-    /// Letter keys ('F', 'D', 'Q') are guarded by [`ctx.wants_keyboard_input()`] so typing
-    /// inside a text input field will not trigger an action.
+    /// **All action keys always fire** regardless of egui's text-input state.
+    /// If you have text input widgets, suppress actions at the call site when the user
+    /// is actively typing (e.g. using a `text_field_focused` boolean set from the `TextEdit` response).
     pub fn handle_action(&self, ctx: &Context) -> Option<VimAction> {
         if !self.actions_enabled {
             return None;
@@ -267,20 +273,18 @@ impl VimKeyHandler {
             return Some(VimAction::Forward);
         }
 
-        if ctx.wants_keyboard_input() {
-            return None;
-        }
-
         ctx.input(|i| {
             if i.modifiers.ctrl {
                 return None;
             }
 
-            if i.key_pressed(egui::Key::F) || i.key_pressed(egui::Key::Enter) {
+            if i.key_pressed(egui::Key::Escape) {
+                Some(VimAction::Back)
+            } else if i.key_pressed(egui::Key::F) || i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::Space) {
                 Some(VimAction::PrimaryClick)
             } else if i.key_pressed(egui::Key::D) {
                 Some(VimAction::SecondaryClick)
-            } else if i.key_pressed(egui::Key::Q) || i.key_pressed(egui::Key::Escape) {
+            } else if i.key_pressed(egui::Key::Q) {
                 Some(VimAction::Back)
             } else {
                 None

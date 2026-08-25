@@ -365,13 +365,11 @@ pub fn show(ui: &mut Ui, state: &mut VimNavDemoState, palette: &ThemePalette) {
     let ctx = ui.ctx();
     let pointer_moved = ui.input(|i| i.pointer.delta() != Vec2::ZERO);
 
-    // Suppress egui's default Tab focus cycling
-    if !ctx.wants_keyboard_input() {
-        ctx.input_mut(|i| {
-            i.consume_key(egui::Modifiers::NONE, egui::Key::Tab);
-            i.consume_key(egui::Modifiers::SHIFT, egui::Key::Tab);
-        });
-    }
+    // Suppress egui's default Tab focus cycling (unconditionally)
+    ctx.input_mut(|i| {
+        i.consume_key(egui::Modifiers::NONE, egui::Key::Tab);
+        i.consume_key(egui::Modifiers::SHIFT, egui::Key::Tab);
+    });
 
     // 1. Inter-Section Navigation with Ctrl + H/J/K/L
     if let Some(event) = state.key_handler.handle_section_nav(

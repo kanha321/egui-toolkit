@@ -23,7 +23,7 @@ pub mod key_handler;
 pub mod navigator;
 pub mod register;
 
-pub use focus_graph::{Direction, FocusGraph, Neighbors};
+pub use focus_graph::{BranchGroup, BranchStrategy, Direction, FocusGraph, Neighbors};
 pub use key_handler::{VimAction, VimKeyHandler};
 pub use navigator::{FocusEvent, FocusWrap, Navigator};
 pub use register::{FocusRegion, FocusRegionResponse};

@@ -7,6 +7,7 @@ members = [
     "src/egui-widgetkit/egui-vim-nav",
     "src/egui-widgetkit/egui-nav-stack",
     "src/egui-widgetkit/egui-themes",
+    "src/egui-widgetkit/egui-widgets",
     "src/test-app",
 ]
 

@@ -1,6 +1,9 @@
 use eframe::egui;
 use super::state::{ActiveScene, TestAppState};
-use crate::scenes::{combined_demo, layout_demo, nav_stack_demo, spring_demo, theme_demo, vim_nav_demo};
+use crate::scenes::{
+    combined_demo, layout_demo, nav_stack_demo, spring_demo, theme_demo, vim_nav_demo,
+    widgets_demo,
+};
 
 impl eframe::App for TestAppState {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -13,6 +16,7 @@ impl eframe::App for TestAppState {
         let dynamic_min_size = match self.active_scene {
             ActiveScene::Layout => layout_demo::min_layout_size(),
             ActiveScene::Spring => egui::Vec2::new(600.0, 420.0),
+            ActiveScene::Widgets => egui::Vec2::new(640.0, 480.0),
             _ => egui::Vec2::new(400.0, 200.0),
         };
         ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(dynamic_min_size));
@@ -24,6 +28,7 @@ impl eframe::App for TestAppState {
                 ui.selectable_value(&mut self.active_scene, ActiveScene::VimNav, "Vim Nav");
                 ui.selectable_value(&mut self.active_scene, ActiveScene::NavStack, "Nav Stack");
                 ui.selectable_value(&mut self.active_scene, ActiveScene::Theme, "Theme");
+                ui.selectable_value(&mut self.active_scene, ActiveScene::Widgets, "Widgets");
                 ui.selectable_value(&mut self.active_scene, ActiveScene::Combined, "Combined");
             });
         });
@@ -38,6 +43,7 @@ impl eframe::App for TestAppState {
                 ActiveScene::VimNav => vim_nav_demo::show(ui, &mut self.vim_nav_demo, &palette),
                 ActiveScene::NavStack => nav_stack_demo::show(ui, &mut self.nav_stack_demo, &palette),
                 ActiveScene::Theme => theme_demo::show(ui, &mut self.theme),
+                ActiveScene::Widgets => widgets_demo::show(ui, &mut self.widgets_demo, &palette),
                 ActiveScene::Combined => combined_demo::show(ui),
             }
         });

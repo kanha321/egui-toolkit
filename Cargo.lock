@@ -1034,6 +1034,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui-widgets"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "egui",
+ "egui-spring",
+ "egui-themes",
+ "spring-core",
+]
+
+[[package]]
 name = "egui-winit"
 version = "0.27.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2919,6 +2930,7 @@ dependencies = [
  "egui-spring",
  "egui-themes",
  "egui-vim-nav",
+ "egui-widgets",
  "spring-core",
 ]
 

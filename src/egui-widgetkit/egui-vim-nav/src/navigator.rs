@@ -1,19 +1,8 @@
-//! Focus cursor and directional navigation engine.
-//!
-//! A [`Navigator<T>`] tracks which node in a [`FocusGraph<T>`] currently has
-//! focus and provides [`move_focus`](Navigator::move_focus) to traverse the
-//! graph in response to directional input.
-//!
-//! # State ownership
-//!
-//! `Navigator<T>` is a plain value the consuming application owns and persists
-//! across frames. There is no hidden global instance. Multiple independent
-//! navigators can coexist (e.g. one per panel or overlay).
-
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::hash::Hash;
 
-use super::focus_graph::{Direction, FocusGraph};
+use super::focus_graph::{BranchStrategy, Direction, FocusGraph};
 
 /// Controls behavior when navigation reaches a graph edge (no neighbor).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -56,6 +45,10 @@ pub struct FocusEvent<T> {
 pub struct Navigator<T: Clone + Eq + Hash + Debug> {
     current_focus: Option<T>,
     wrap: FocusWrap,
+    /// Stores the last-visited active child for each branch: `(parent, dir) -> active_child`.
+    branch_memory: HashMap<(T, Direction), T>,
+    /// Runtime strategy overrides: `(parent, dir) -> strategy`.
+    branch_strategies: HashMap<(T, Direction), BranchStrategy<T>>,
 }
 
 impl<T: Clone + Eq + Hash + Debug> Default for Navigator<T> {
@@ -63,6 +56,8 @@ impl<T: Clone + Eq + Hash + Debug> Default for Navigator<T> {
         Self {
             current_focus: None,
             wrap: FocusWrap::default(),
+            branch_memory: HashMap::new(),
+            branch_strategies: HashMap::new(),
         }
     }
 }
@@ -95,18 +90,32 @@ impl<T: Clone + Eq + Hash + Debug> Navigator<T> {
         self.current_focus = node;
     }
 
+    /// Sets focus to the given node and updates branch memory against the provided graph.
+    pub fn set_focus_with_graph(&mut self, node: Option<T>, graph: &FocusGraph<T>) {
+        if let Some(ref n) = node {
+            self.record_focus(n, graph);
+        }
+        self.current_focus = node;
+    }
+
+    /// Records branch memory whenever focus lands on a node that belongs to any registered branch.
+    ///
+    /// Ensures that intra-branch lateral navigation (e.g. `H`/`L` across siblings) continuously
+    /// updates `(parent, dir) -> active_child` memory in real time.
+    pub fn record_focus(&mut self, node: &T, graph: &FocusGraph<T>) {
+        for ((parent, dir), branch) in graph.branches() {
+            if branch.children.contains(node) {
+                self.branch_memory.insert((parent.clone(), *dir), node.clone());
+            }
+        }
+    }
+
     /// Moves focus in the given direction within the graph.
     ///
-    /// Returns a [`FocusEvent`] describing the change if focus actually moved,
-    /// or `None` if:
-    /// - No node is currently focused and the graph is empty
-    /// - The focused node has no neighbor in that direction (clamp)
+    /// Resolves 1-to-many branch groups dynamically using the branch's [`BranchStrategy`]
+    /// (e.g. returning to the last-visited child under `RememberLast`).
     ///
-    /// # Graceful fallback
-    ///
-    /// If the currently focused node is not found in the graph (e.g. the app
-    /// removed the region while it was focused), focus falls back to the
-    /// graph's first available node. This never panics.
+    /// Returns a [`FocusEvent`] describing the change if focus actually moved, or `None`.
     pub fn move_focus(
         &mut self,
         graph: &FocusGraph<T>,
@@ -115,13 +124,12 @@ impl<T: Clone + Eq + Hash + Debug> Navigator<T> {
         // If nothing is focused, try to focus the first node in the graph
         let current = match &self.current_focus {
             Some(c) => {
-                // Verify the focused node still exists in the graph
                 if graph.contains(c) {
                     c.clone()
                 } else {
-                    // Focused node was removed — fall back to first available
                     let fallback = graph.first_node()?.clone();
                     let previous = self.current_focus.take();
+                    self.record_focus(&fallback, graph);
                     self.current_focus = Some(fallback.clone());
                     return Some(FocusEvent {
                         previous,
@@ -131,8 +139,8 @@ impl<T: Clone + Eq + Hash + Debug> Navigator<T> {
                 }
             }
             None => {
-                // No focus at all — try to establish initial focus
                 let first = graph.first_node()?.clone();
+                self.record_focus(&first, graph);
                 self.current_focus = Some(first.clone());
                 return Some(FocusEvent {
                     previous: None,
@@ -142,10 +150,64 @@ impl<T: Clone + Eq + Hash + Debug> Navigator<T> {
             }
         };
 
-        // Look up the neighbor in the requested direction
-        match graph.get_neighbor(&current, dir) {
+        // Check if there is a 1-to-many branch originating from `current` in `dir`
+        let target_node = if let Some(branch) = graph.get_branch(&current, dir) {
+            let strategy = self.branch_strategies.get(&(current.clone(), dir))
+                .cloned()
+                .unwrap_or_else(|| branch.strategy.clone());
+
+            let resolved = match strategy {
+                BranchStrategy::First => {
+                    branch.children.first()
+                        .filter(|c| graph.contains(c))
+                        .or_else(|| branch.children.first())
+                }
+                BranchStrategy::Last => {
+                    branch.children.last()
+                        .filter(|c| graph.contains(c))
+                        .or_else(|| branch.children.first())
+                }
+                BranchStrategy::EdgeAware => {
+                    let target_child = match dir {
+                        Direction::Up | Direction::Left => branch.children.last(),
+                        Direction::Down | Direction::Right => branch.children.first(),
+                    };
+                    target_child
+                        .filter(|c| graph.contains(c))
+                        .or_else(|| branch.children.first())
+                }
+                BranchStrategy::Anchor(ref anchor) => {
+                    if branch.children.contains(anchor) && graph.contains(anchor) {
+                        Some(anchor)
+                    } else {
+                        // Self-healing fallback if anchor was removed
+                        branch.children.first()
+                    }
+                }
+                BranchStrategy::RememberLast => {
+                    if let Some(mem) = self.branch_memory.get(&(current.clone(), dir)) {
+                        if branch.children.contains(mem) && graph.contains(mem) {
+                            Some(mem)
+                        } else {
+                            // Self-healing fallback if remembered child was removed
+                            self.branch_memory.remove(&(current.clone(), dir));
+                            branch.children.first()
+                        }
+                    } else {
+                        branch.children.first()
+                    }
+                }
+            };
+
+            resolved.cloned()
+        } else {
+            // Standard single neighbor
+            graph.get_neighbor(&current, dir).cloned()
+        };
+
+        match target_node {
             Some(next) => {
-                let next = next.clone();
+                self.record_focus(&next, graph);
                 let previous = self.current_focus.replace(next.clone());
                 Some(FocusEvent {
                     previous,
@@ -154,11 +216,40 @@ impl<T: Clone + Eq + Hash + Debug> Navigator<T> {
                 })
             }
             None => {
-                // No neighbor in that direction
                 match self.wrap {
-                    FocusWrap::Clamp => None, // Stay where we are
+                    FocusWrap::Clamp => None,
                 }
             }
         }
+    }
+
+    /// Returns the remembered child for branch `(parent, dir)`, if any.
+    pub fn get_last_branch_focus(&self, parent: &T, dir: Direction) -> Option<&T> {
+        self.branch_memory.get(&(parent.clone(), dir))
+    }
+
+    /// Explicitly sets the remembered child for branch `(parent, dir)`.
+    pub fn set_last_branch_focus(&mut self, parent: T, dir: Direction, child: T) {
+        self.branch_memory.insert((parent, dir), child);
+    }
+
+    /// Overrides the resolution strategy for a specific branch at runtime.
+    pub fn set_branch_strategy(&mut self, parent: T, dir: Direction, strategy: BranchStrategy<T>) {
+        self.branch_strategies.insert((parent, dir), strategy);
+    }
+
+    /// Clears all recorded branch memory globally.
+    pub fn clear_branch_memory(&mut self) {
+        self.branch_memory.clear();
+    }
+
+    /// Clears all branch memory entries originating from `parent`.
+    pub fn clear_branch_memory_for(&mut self, parent: &T) {
+        self.branch_memory.retain(|(p, _), _| p != parent);
+    }
+
+    /// Clears branch memory specifically for `(parent, dir)`.
+    pub fn clear_branch_memory_for_dir(&mut self, parent: &T, dir: Direction) {
+        self.branch_memory.remove(&(parent.clone(), dir));
     }
 }

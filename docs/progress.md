@@ -15,7 +15,8 @@ This document tracks implementation progress across all parts and subparts defin
 | **Part 4** | `egui-vim-nav` (Intra-Screen Focus Graph) | ✅ Completed | Generic `FocusGraph<T>` + `Navigator<T>` + `VimKeyHandler`; 15 unit tests + 2 doctests passed; `grid_navigation` example |
 | **Part 5** | `egui-themes` (Token-Based Theming & Live Preview) | ✅ Completed | 12 presets, token system, exponential lerp morphing, egui visuals sync; 5 unit tests + 1 doctest passed; `theme_switcher` example |
 | **Part 6** | `egui-nav-stack` (Navigation 3 Screen Back-Stack) | ✅ Completed | `stack_push_pop_replace` (9 tests) + `stack_navigation` example + 4 doctests passed |
-| **Part 7** | `test-app` (Multi-Crate Integration & Showcase App) | 🟡 In Progress | Isolated scenes (Layout, Spring, VimNav, NavStack, Theme) + responsive `egui-layout` integration |
+| **Part 7** | `egui-widgets` (Motion Physics & Palette Component Suite) | ✅ Completed | Buttons, Switches, Tabs, Sliders, Progress, Checkboxes, Cards, Badges, Inputs; 9 unit tests + 9 doctests passed; `widget_gallery` example |
+| **Part 8** | `test-app` (Multi-Crate Integration & Showcase App) | 🟡 In Progress | Isolated scenes (Layout, Spring, VimNav, NavStack, Theme, Widgets) + responsive `egui-layout` integration |
 
 ---
 
@@ -136,17 +137,40 @@ This document tracks implementation progress across all parts and subparts defin
 
 ---
 
-### Part 7 — `test-app` (Multi-Crate Integration & Showcase App)
-- [x] `src/test-app/Cargo.toml` (path-depends on all 6 `egui-widgetkit/*` crates)
-- [x] **7.1** `src/test-app/src/main.rs` (windows subsystem, JetBrainsMono Nerd Font, dynamic min inner size)
-- [x] **7.2** `src/test-app/src/app.rs` & `app/` (`state.rs`, `update.rs`)
-- [ ] **7.3** Isolated demo scenes in `scenes/`:
+### Part 7 — `egui-widgets` (Motion Physics & Palette Component Suite)
+- [x] `src/egui-widgetkit/egui-widgets/Cargo.toml` (depends on `egui`, `spring-core`, `egui-themes`, `egui-spring`)
+- [x] `src/egui-widgetkit/egui-widgets/README.md`
+- [x] `src/egui-widgetkit/egui-widgets/src/lib.rs` (state ownership docs, clean re-exports)
+- [x] **7.1** `button.rs` — `Button`, `ButtonVariant`, `ButtonSize`, `ButtonState` (spring press bounce, hover luminance glide, shortcuts, badges)
+- [x] **7.2** `switch.rs` — `Switch`, `SwitchSize`, `SwitchState` (1D spring thumb translation with elastic overshoot, track morphing)
+- [x] **7.3** `tabs.rs` — `SegmentedTabs`, `TabItem`, `TabsState` (spring-animated sliding pill indicator)
+- [x] **7.4** `progress.rs` — `ProgressBar`, `ProgressVariant`, `ProgressState` (physical catchup smoothing)
+- [x] **7.5** `slider.rs` — `Slider`, `SliderState` (spring-scaling knob on hover/drag)
+- [x] **7.6** `checkbox.rs` — `Checkbox`, `CheckboxState`, `RadioButton` (spring checkmark pop & radio dot expansion)
+- [x] **7.7** `card.rs` — `Card`, `CardState` (styled surfaces with spring hover elevation lift)
+- [x] **7.8** `badge.rs` — `Badge`, `BadgeVariant` (semantic status indicators with active dot)
+- [x] **7.9** `input.rs` — `TextInput`, `InputState` (spring focus glow rings, icons, quick clear button)
+- [x] **7.10** Tests & Example:
+  - [x] `tests/widget_tests.rs` (9 unit tests + 9 doctests passed)
+  - [x] `examples/widget_gallery.rs` (interactive standalone showcase)
+- [x] **7.11** `test-app` scene: `scenes/widgets_demo.rs` (integrated showcase with live palette & physics customization)
+- [x] Verified: `cargo tree -p egui-widgets --depth 1` confirms clean dependency isolation
+- [x] Verified: `cargo test --workspace --all-features` passes (81/81 tests across workspace)
+
+---
+
+### Part 8 — `test-app` (Multi-Crate Integration & Showcase App)
+- [x] `src/test-app/Cargo.toml` (path-depends on all `egui-widgetkit/*` crates)
+- [x] **8.1** `src/test-app/src/main.rs` (windows subsystem, JetBrainsMono Nerd Font, dynamic min inner size)
+- [x] **8.2** `src/test-app/src/app.rs` & `app/` (`state.rs`, `update.rs`)
+- [ ] **8.3** Isolated demo scenes in `scenes/`:
   - [x] `scenes/layout_demo.rs` (exercises `egui-layout` with dynamic min size & rounded corners)
   - [x] `scenes/spring_demo.rs` (exercises `spring-core` + `egui-spring` with `egui-layout` nested splits)
   - [x] `scenes/vim_nav_demo.rs` (exercises `egui-vim-nav` with unified 2-tier highlights)
   - [x] `scenes/nav_stack_demo.rs` (exercises `egui-nav-stack` with forward/backward data passing, breadcrumb trail, and stack inspector)
   - [x] `scenes/theme_demo.rs` (exercises `egui-themes` with live preview & semantic token tweaker)
-- [ ] **7.4** `scenes/combined_demo.rs` (Full integrated multi-crate showcase: layout + spring highlight + nav-stack + themes + vim nav)
+  - [x] `scenes/widgets_demo.rs` (exercises `egui-widgets` with live physics & theme controls)
+- [ ] **8.4** `scenes/combined_demo.rs` (Full integrated multi-crate showcase: layout + spring highlight + nav-stack + themes + vim nav + widgets)
 
 ---
 

@@ -1,0 +1,15 @@
+[package]
+name = "egui-widgets"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "App-agnostic, token-aware, spring-animated UI component library for egui"
+
+[dependencies]
+egui = { workspace = true }
+spring-core = { path = "../spring-core" }
+egui-themes = { path = "../egui-themes" }
+egui-spring = { path = "../egui-spring" }
+
+[dev-dependencies]
+eframe = { workspace = true }

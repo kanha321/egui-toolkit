@@ -1,0 +1,1183 @@
+//! Widgets showcase scene displaying all `egui-widgets` components.
+
+use egui::{Rect, Rounding, Stroke, Ui, Vec2};
+use egui_spring::{HighlightConfig, HighlightGroup, MotionPhysics};
+use egui_themes::ThemePalette;
+use egui_vim_nav::{Direction, FocusGraph, Navigator, VimAction, VimKeyHandler};
+use egui_widgets::{
+    Badge, Button, Card, Checkbox, ProgressBar, ProgressVariant, RadioButton,
+    SegmentedTabs, Slider, Switch, TextInput,
+};
+use spring_core::SpringParams;
+
+/// Widget category tabs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum WidgetsCategory {
+    ButtonsAndBadges,
+    SwitchesAndToggles,
+    SlidersAndInputs,
+    SurfacesAndProgress,
+    #[default]
+    CompositeDashboard,
+}
+
+/// Focus node IDs for every interactive element in the CompositeDashboard.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum DashboardWidget {
+    SearchInput,
+    ScanButton,
+    ClearButton,
+    SwitchTurbo,
+    SwitchVpn,
+    SwitchAnalytics,
+    SliderBandwidth,
+    SliderThermal,
+    ProgressBtn25,
+    ProgressBtn50,
+    ProgressBtn75,
+    ProgressBtn100,
+    TokenInput,
+    RadioDev,
+    RadioStaging,
+    RadioProd,
+    CheckNotify,
+    CheckMirror,
+    BtnDeploy,
+    BtnVerify,
+    BtnPurge,
+    BtnHalt,
+}
+
+/// Section IDs for Ctrl+HJKL inter-card navigation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum DashSection {
+    SearchBar = 0,
+    CoreEngine = 1,
+    PipelineSync = 2,
+    Security = 3,
+    ActionDispatcher = 4,
+}
+
+/// Two-tier highlight layers: outer section + inner element.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum DashHighlight {
+    /// Outer card/section highlight (glides around cards on Ctrl+HJKL)
+    Section,
+    /// Inner element highlight (glides between individual widgets on HJKL)
+    Item,
+}
+
+#[derive(Debug)]
+pub struct WidgetsDemoState {
+    pub category: WidgetsCategory,
+    // Interactive control states
+    pub switch_turbo: bool,
+    pub switch_analytics: bool,
+    pub switch_vpn: bool,
+    pub volume_slider: f32,
+    pub threshold_slider: f32,
+    pub progress_value: f32,
+    pub checkbox_newsletter: bool,
+    pub checkbox_telemetry: bool,
+    pub radio_tier: usize,
+    pub search_term: String,
+    pub token_input: String,
+    // Intuitive physics parameters
+    pub response_time: f32,    // seconds — how long the animation takes
+    pub bounce: f32,           // 0.0–1.0 — overshoot amount (0 = none)
+    pub mass: f32,             // weight/inertia (1.0 = normal)
+    pub velocity_kick: f32,    // initial impulse on click (0.0 = pure spring)
+    // Sandbox test slider value
+    pub test_slider_val: f32,
+    // Dashboard vim navigation state
+    pub dash_graph: FocusGraph<DashboardWidget>,
+    pub dash_nav: Navigator<DashboardWidget>,
+    pub dash_section_graph: FocusGraph<DashSection>,
+    pub dash_section_nav: Navigator<DashSection>,
+    pub dash_highlights: HighlightGroup<DashHighlight>,
+    pub dash_key_handler: VimKeyHandler,
+    pub last_section_widget: [DashboardWidget; 5],
+}
+
+impl Default for WidgetsDemoState {
+    fn default() -> Self {
+        use DashboardWidget::*;
+
+        // Build the focus graph matching each card's internal layout
+        let mut g = FocusGraph::new();
+
+        // 1. Top search bar (horizontal row)
+        g.connect_horizontal(SearchInput, ScanButton);
+        g.connect_horizontal(ScanButton, ClearButton);
+
+        // 2. Column 1: Core Engine card (vertical stack)
+        g.connect_vertical(SwitchTurbo, SwitchVpn);
+        g.connect_vertical(SwitchVpn, SwitchAnalytics);
+        g.connect_vertical(SwitchAnalytics, SliderBandwidth);
+        g.connect_vertical(SliderBandwidth, SliderThermal);
+
+        // 3. Column 1: Pipeline Sync card (preset buttons horizontal strip)
+        g.connect_horizontal(ProgressBtn25, ProgressBtn50);
+        g.connect_horizontal(ProgressBtn50, ProgressBtn75);
+        g.connect_horizontal(ProgressBtn75, ProgressBtn100);
+
+        // 4. Column 2: Security card (token input -> radios -> notify sandwich + mirror)
+        g.connect_branch_between(
+            TokenInput,
+            Direction::Down,
+            &[RadioDev, RadioStaging, RadioProd],
+            CheckNotify,
+        );
+        g.connect_vertical(CheckNotify, CheckMirror);
+
+        // 5. Column 2: Action Dispatcher card (horizontal button strip)
+        g.connect_horizontal(BtnDeploy, BtnVerify);
+        g.connect_horizontal(BtnVerify, BtnPurge);
+        g.connect_horizontal(BtnPurge, BtnHalt);
+
+        // Section graph for Inter-Card navigation (Ctrl+HJKL and Pass 2 boundary fallback)
+        let mut sg = FocusGraph::new();
+        sg.connect_vertical(DashSection::SearchBar, DashSection::CoreEngine);
+        sg.connect_vertical(DashSection::SearchBar, DashSection::Security);
+        sg.connect_horizontal(DashSection::CoreEngine, DashSection::Security);
+        sg.connect_vertical(DashSection::CoreEngine, DashSection::PipelineSync);
+        sg.connect_vertical(DashSection::Security, DashSection::ActionDispatcher);
+        sg.connect_horizontal(DashSection::PipelineSync, DashSection::ActionDispatcher);
+
+        // Two-tier highlight group
+        let mut highlights = HighlightGroup::new();
+        // Outer section highlight (gentle, cushioned glide around cards)
+        highlights.add(
+            DashHighlight::Section,
+            HighlightConfig::new()
+                .with_motion(MotionPhysics::Gentle)
+                .with_fill(egui::Color32::from_rgba_unmultiplied(130, 180, 255, 10))
+                .with_stroke(Stroke::new(2.0, egui::Color32::from_rgba_unmultiplied(130, 180, 255, 100)))
+                .with_rounding(8.0)
+                .with_padding(4.0),
+        );
+        // Inner element highlight (snappier, tracks focused widget)
+        highlights.add(
+            DashHighlight::Item,
+            HighlightConfig::new()
+                .with_motion(MotionPhysics::Custom(SpringParams::new(28.1, 0.64)))
+                .with_fill(egui::Color32::from_rgba_unmultiplied(130, 130, 255, 30))
+                .with_stroke(Stroke::new(2.0, egui::Color32::from_rgba_unmultiplied(130, 130, 255, 180)))
+                .with_rounding(6.0)
+                .with_padding(3.0),
+        );
+
+        Self {
+            category: WidgetsCategory::CompositeDashboard,
+            switch_turbo: true,
+            switch_analytics: false,
+            switch_vpn: true,
+            volume_slider: 68.0,
+            threshold_slider: 42.0,
+            progress_value: 0.65,
+            checkbox_newsletter: true,
+            checkbox_telemetry: false,
+            radio_tier: 2,
+            search_term: String::new(),
+            token_input: String::new(),
+            response_time: 0.10,
+            bounce: 0.40,
+            mass: 5.0,
+            velocity_kick: 5.0,
+            test_slider_val: 45.0,
+            dash_graph: g,
+            dash_nav: Navigator::new().with_initial_focus(SwitchTurbo),
+            dash_section_graph: sg,
+            dash_section_nav: Navigator::new().with_initial_focus(DashSection::CoreEngine),
+            dash_highlights: highlights,
+            dash_key_handler: VimKeyHandler::new().with_tab(false),
+            last_section_widget: [
+                SearchInput,
+                SwitchTurbo,
+                ProgressBtn25,
+                TokenInput,
+                BtnDeploy,
+            ],
+        }
+    }
+}
+
+impl WidgetsDemoState {
+    /// Focuses a widget, updates branch memory, synchronizes section navigation,
+    /// and records the last active widget for that section.
+    pub fn record_widget_focus(&mut self, id: DashboardWidget) {
+        self.dash_nav.set_focus_with_graph(Some(id), &self.dash_graph);
+        let sec = widget_to_section(id);
+        self.dash_section_nav.set_focus(Some(sec));
+        self.last_section_widget[sec as usize] = id;
+    }
+}
+
+/// Maps a DashboardWidget to the DashSection (card) it belongs to.
+fn widget_to_section(w: DashboardWidget) -> DashSection {
+    use DashboardWidget::*;
+    match w {
+        SearchInput | ScanButton | ClearButton => DashSection::SearchBar,
+        SwitchTurbo | SwitchVpn | SwitchAnalytics | SliderBandwidth | SliderThermal
+            => DashSection::CoreEngine,
+        ProgressBtn25 | ProgressBtn50 | ProgressBtn75 | ProgressBtn100
+            => DashSection::PipelineSync,
+        TokenInput | RadioDev | RadioStaging | RadioProd | CheckNotify | CheckMirror
+            => DashSection::Security,
+        BtnDeploy | BtnVerify | BtnPurge | BtnHalt
+            => DashSection::ActionDispatcher,
+    }
+}
+
+/// Determines the appropriate boundary entry widget when navigating into `section` in movement direction `nav_dir`.
+fn section_entry_widget(
+    section: DashSection,
+    nav_dir: Direction,
+    last_widget: DashboardWidget,
+) -> DashboardWidget {
+    use DashboardWidget::*;
+    match nav_dir {
+        // Horizontal transitions: restore last-focused widget position in target section
+        Direction::Left | Direction::Right => last_widget,
+
+        // Vertical transitions: direction-aware physical edge entry
+        Direction::Up => match section {
+            DashSection::SearchBar => last_widget,
+            DashSection::CoreEngine => SliderThermal, // moving UP -> enter via bottom-most element
+            DashSection::PipelineSync => last_widget, // horizontal preset strip resumes active chip
+            DashSection::Security => CheckMirror,     // moving UP -> enter via bottom-most element
+            DashSection::ActionDispatcher => last_widget,
+        },
+        Direction::Down => match section {
+            DashSection::SearchBar => SearchInput,
+            DashSection::CoreEngine => SwitchTurbo,   // moving DOWN -> enter via top-most element
+            DashSection::PipelineSync => last_widget, // horizontal preset strip resumes active chip
+            DashSection::Security => TokenInput,      // moving DOWN -> enter via top-most element
+            DashSection::ActionDispatcher => last_widget,
+        },
+    }
+}
+
+/// Converts intuitive (response_time, bounce, mass) into SpringParams (ω₀, ζ).
+fn compute_spring_params(response_time: f32, bounce: f32, mass: f32) -> SpringParams {
+    let omega_0 = (std::f32::consts::TAU / response_time.max(0.01)) / mass.sqrt().max(0.1);
+    let zeta = 1.0 - bounce.clamp(0.0, 1.0) * 0.90; // bounce 0→ζ=1.0, bounce 1→ζ=0.10
+    SpringParams::new(omega_0, zeta)
+}
+
+pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
+    let custom_spring_params = compute_spring_params(state.response_time, state.bounce, state.mass);
+    let computed_omega = custom_spring_params.angular_frequency;
+    let computed_zeta = custom_spring_params.damping_ratio;
+    let velocity_kick = state.velocity_kick;
+
+    ui.horizontal(|ui| {
+        ui.heading("🧩 egui-widgets Showcase");
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            Badge::new(format!(
+                "ω₀: {:.0}, ζ: {:.2} | {:.0}ms, bounce: {:.0}%, mass: {:.1}",
+                computed_omega, computed_zeta,
+                state.response_time * 1000.0, state.bounce * 100.0, state.mass
+            ))
+                .accent()
+                .palette(palette)
+                .show(ui);
+        });
+    });
+    ui.label("Polished design-system layer powered by ThemePalette and spring motion physics");
+    ui.add_space(6.0);
+
+    // Live Physics Tuner — compact
+    Card::new()
+        .title("🎛️ Motion Physics Tuner")
+        .subtitle("Applies to every widget uniformly")
+        .palette(palette)
+        .show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label("Presets:");
+                if Button::new("Instant").small().palette(palette).spring_params(custom_spring_params).show(ui).clicked() {
+                    state.response_time = 0.08; state.bounce = 0.0; state.mass = 1.0; state.velocity_kick = 0.0;
+                }
+                if Button::new("Fast & Crisp").small().palette(palette).spring_params(custom_spring_params).show(ui).clicked() {
+                    state.response_time = 0.12; state.bounce = 0.05; state.mass = 1.0; state.velocity_kick = 0.0;
+                }
+                if Button::new("Snappy Pop").small().palette(palette).spring_params(custom_spring_params).show(ui).clicked() {
+                    state.response_time = 0.18; state.bounce = 0.40; state.mass = 1.0; state.velocity_kick = 0.0;
+                }
+                if Button::new("Smooth Glide").small().palette(palette).spring_params(custom_spring_params).show(ui).clicked() {
+                    state.response_time = 0.30; state.bounce = 0.0; state.mass = 1.8; state.velocity_kick = 0.0;
+                }
+                if Button::new("Juicy Spring").small().palette(palette).spring_params(custom_spring_params).show(ui).clicked() {
+                    state.response_time = 0.20; state.bounce = 0.65; state.mass = 1.0; state.velocity_kick = 3.0;
+                }
+            });
+
+            ui.add_space(6.0);
+
+            let bounce_hint = match () {
+                _ if state.bounce < 0.05 => " (None)",
+                _ if state.bounce < 0.25 => " (Subtle)",
+                _ if state.bounce < 0.50 => " (Springy)",
+                _ if state.bounce < 0.75 => " (Bouncy)",
+                _ => " (Very Bouncy)",
+            };
+            let mass_hint = match () {
+                _ if state.mass < 0.6 => " (Light)",
+                _ if state.mass < 1.2 => " (Normal)",
+                _ if state.mass < 2.5 => " (Heavy)",
+                _ => " (Very Heavy)",
+            };
+            let kick_hint = if state.velocity_kick < 0.1 { " (Off)" } else { " (Flick)" };
+
+            ui.columns(2, |cols| {
+                cols[0].label("⏱ Response Time:");
+                Slider::new(&mut state.response_time, 0.03..=0.80)
+                    .step(0.01).suffix(" sec").palette(palette)
+                    .show(&mut cols[0]);
+                cols[0].add_space(4.0);
+                cols[0].label("⚖️ Mass:");
+                Slider::new(&mut state.mass, 0.3..=5.0)
+                    .step(0.1).suffix(mass_hint).palette(palette)
+                    .show(&mut cols[0]);
+
+                cols[1].label("🏀 Bounce:");
+                Slider::new(&mut state.bounce, 0.0..=1.0)
+                    .step(0.01).suffix(bounce_hint).palette(palette)
+                    .show(&mut cols[1]);
+                cols[1].add_space(4.0);
+                cols[1].label("💥 Velocity Kick:");
+                Slider::new(&mut state.velocity_kick, 0.0..=10.0)
+                    .step(0.5).suffix(kick_hint).palette(palette)
+                    .show(&mut cols[1]);
+            });
+
+            ui.add_space(2.0);
+            Badge::new(format!(
+                "ω₀ = {:.1} rad/s, ζ = {:.2}",
+                computed_omega, computed_zeta
+            )).info().palette(palette).show(ui);
+        });
+
+    ui.add_space(10.0);
+
+    // Category Tabs
+    SegmentedTabs::new(&mut state.category)
+        .tab(WidgetsCategory::ButtonsAndBadges, "🔘 Buttons & Badges")
+        .tab(WidgetsCategory::SwitchesAndToggles, "🎚️ Switches & Toggles")
+        .tab(WidgetsCategory::SlidersAndInputs, "🎛️ Sliders & Inputs")
+        .tab(WidgetsCategory::SurfacesAndProgress, "📦 Cards & Progress")
+        .tab(WidgetsCategory::CompositeDashboard, "🚀 All-In-One Dashboard")
+        .palette(palette)
+        .show(ui);
+
+    ui.add_space(12.0);
+
+    egui::ScrollArea::vertical().show(ui, |ui| {
+        match state.category {
+            WidgetsCategory::ButtonsAndBadges => {
+                Card::new()
+                    .title("Button Variants & Micro-Interactions")
+                    .subtitle("Spring-animated press compression and hover luminance glide")
+                    .palette(palette)
+                    .show(ui, |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            Button::new("Primary Action")
+                                .primary()
+                                .icon("⚡")
+                                .palette(palette)
+                                .spring_params(custom_spring_params)
+                                .show(ui);
+
+                            Button::new("Secondary")
+                                .secondary()
+                                .palette(palette)
+                                .spring_params(custom_spring_params)
+                                .show(ui);
+
+                            Button::new("Success Action")
+                                .success()
+                                .icon("✓")
+                                .palette(palette)
+                                .spring_params(custom_spring_params)
+                                .show(ui);
+
+                            Button::new("Warning Note")
+                                .warning()
+                                .icon("⚠")
+                                .palette(palette)
+                                .spring_params(custom_spring_params)
+                                .show(ui);
+
+                            Button::new("Destructive Action")
+                                .danger()
+                                .icon("🗑")
+                                .palette(palette)
+                                .spring_params(custom_spring_params)
+                                .show(ui);
+
+                            Button::new("Outline")
+                                .outline()
+                                .palette(palette)
+                                .spring_params(custom_spring_params)
+                                .show(ui);
+
+                            Button::new("Ghost")
+                                .ghost()
+                                .palette(palette)
+                                .spring_params(custom_spring_params)
+                                .show(ui);
+                        });
+
+                        ui.add_space(10.0);
+                        ui.separator();
+                        ui.add_space(6.0);
+
+                        ui.label("Button Sizing & Badges:");
+                        ui.horizontal(|ui| {
+                            Button::new("Small").small().palette(palette).show(ui);
+                            Button::new("Medium Standard").medium().badge("Pro").palette(palette).show(ui);
+                            Button::new("Large CTA").large().shortcut("Ctrl+Enter").palette(palette).show(ui);
+                        });
+                    });
+
+                ui.add_space(12.0);
+
+                Card::new()
+                    .title("Semantic Status Badges & Tags")
+                    .subtitle("Status indicators with optional pulsing dots")
+                    .palette(palette)
+                    .show(ui, |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            Badge::new("System Active").success().dot(true).palette(palette).show(ui);
+                            Badge::new("High CPU Load").warning().dot(true).palette(palette).show(ui);
+                            Badge::new("Connection Error").danger().dot(true).palette(palette).show(ui);
+                            Badge::new("Syncing...").info().dot(true).palette(palette).show(ui);
+                            Badge::new("v2.4.0-stable").neutral().palette(palette).show(ui);
+                        });
+                    });
+            }
+
+            WidgetsCategory::SwitchesAndToggles => {
+                Card::new()
+                    .title("Spring Toggle Switches")
+                    .subtitle("1D ODE physics with elastic thumb arrivals and track color morphing")
+                    .palette(palette)
+                    .show(ui, |ui| {
+                        Switch::new(&mut state.switch_turbo)
+                            .label("Turbo Processing Acceleration")
+                            .large()
+                            .palette(palette)
+                            .spring_params(custom_spring_params)
+                            .show(ui);
+                        ui.add_space(8.0);
+
+                        Switch::new(&mut state.switch_vpn)
+                            .label("Encrypted Tunnel Proxy")
+                            .standard()
+                            .palette(palette)
+                            .spring_params(custom_spring_params)
+                            .show(ui);
+                        ui.add_space(8.0);
+
+                        Switch::new(&mut state.switch_analytics)
+                            .label("Anonymous Usage Telemetry")
+                            .compact()
+                            .palette(palette)
+                            .spring_params(custom_spring_params)
+                            .show(ui);
+                    });
+
+                ui.add_space(12.0);
+
+                Card::new()
+                    .title("Checkboxes & Radio Options")
+                    .subtitle("Spring checkmark scale pop and radio dot expansion")
+                    .palette(palette)
+                    .show(ui, |ui| {
+                        Checkbox::new(&mut state.checkbox_newsletter)
+                            .label("Subscribe to product release updates")
+                            .palette(palette)
+                            .spring_params(custom_spring_params)
+                            .show(ui);
+                        ui.add_space(6.0);
+
+                        Checkbox::new(&mut state.checkbox_telemetry)
+                            .label("Send anonymous crash diagnostic dumps")
+                            .palette(palette)
+                            .spring_params(custom_spring_params)
+                            .show(ui);
+
+                        ui.add_space(10.0);
+                        ui.separator();
+                        ui.add_space(6.0);
+
+                        ui.label("Select Deployment Tier:");
+                        ui.horizontal(|ui| {
+                            RadioButton::new(1, &mut state.radio_tier)
+                                .label("Standard")
+                                .palette(palette)
+                                .show(ui);
+                            RadioButton::new(2, &mut state.radio_tier)
+                                .label("Professional")
+                                .palette(palette)
+                                .show(ui);
+                            RadioButton::new(3, &mut state.radio_tier)
+                                .label("Enterprise")
+                                .palette(palette)
+                                .show(ui);
+                        });
+                    });
+            }
+
+            WidgetsCategory::SlidersAndInputs => {
+                Card::new()
+                    .title("Numeric Sliders")
+                    .subtitle("Spring-animated position glide on click, 1:1 tracking on drag")
+                    .palette(palette)
+                    .show(ui, |ui| {
+                        Slider::new(&mut state.volume_slider, 0.0..=100.0)
+                            .label("Playback Volume")
+                            .suffix(" %")
+                            .palette(palette)
+                            .spring_params(custom_spring_params)
+                            .click_momentum(velocity_kick)
+                            .show(ui);
+                        ui.add_space(8.0);
+
+                        Slider::new(&mut state.threshold_slider, 0.0..=100.0)
+                            .label("Detection Sensitivity")
+                            .suffix(" dB")
+                            .palette(palette)
+                            .spring_params(custom_spring_params)
+                            .click_momentum(velocity_kick)
+                            .show(ui);
+                        ui.add_space(8.0);
+
+                        Slider::new(&mut state.test_slider_val, 0.0..=100.0)
+                            .label("Sandbox — click jump buttons →")
+                            .suffix(" %")
+                            .palette(palette)
+                            .spring_params(custom_spring_params)
+                            .click_momentum(velocity_kick)
+                            .show(ui);
+                        ui.horizontal(|ui| {
+                            for (label, val) in [("0%", 0.0), ("25%", 25.0), ("50%", 50.0), ("75%", 75.0), ("100%", 100.0)] {
+                                if Button::new(label).small().palette(palette).show(ui).clicked() {
+                                    state.test_slider_val = val;
+                                }
+                            }
+                            if Button::new("🎲").small().palette(palette).show(ui).clicked() {
+                                state.test_slider_val = ((state.test_slider_val * 37.0 + 17.0) % 100.0).round();
+                            }
+                        });
+                    });
+
+                ui.add_space(12.0);
+
+                Card::new()
+                    .title("Text Inputs")
+                    .subtitle("Spring-animated focus glow and clear button")
+                    .palette(palette)
+                    .show(ui, |ui| {
+                        TextInput::new(&mut state.search_term)
+                            .placeholder("Search components or assets...")
+                            .icon("🔍")
+                            .clear_button(true)
+                            .palette(palette)
+                            .spring_params(custom_spring_params)
+                            .show(ui);
+                        ui.add_space(8.0);
+
+                        TextInput::new(&mut state.token_input)
+                            .placeholder("Enter secret API authorization token...")
+                            .icon("🔑")
+                            .password(true)
+                            .clear_button(true)
+                            .palette(palette)
+                            .spring_params(custom_spring_params)
+                            .show(ui);
+                    });
+            }
+
+            WidgetsCategory::SurfacesAndProgress => {
+                Card::new()
+                    .title("Physical Progress Catchup Meters")
+                    .subtitle("Smooth continuous ODE spring catchup on target changes")
+                    .palette(palette)
+                    .show(ui, |ui| {
+                        ProgressBar::new(state.progress_value)
+                            .label("Overall Job Execution")
+                            .show_percentage(true)
+                            .variant(ProgressVariant::Accent)
+                            .palette(palette)
+                            .spring_params(custom_spring_params)
+                            .show(ui);
+                        ui.add_space(8.0);
+
+                        ProgressBar::new(state.progress_value * 0.8)
+                            .label("Database Migration")
+                            .show_percentage(true)
+                            .variant(ProgressVariant::Success)
+                            .palette(palette)
+                            .spring_params(custom_spring_params)
+                            .show(ui);
+                        ui.add_space(8.0);
+
+                        ProgressBar::new(state.progress_value * 0.4)
+                            .label("Asset Compression")
+                            .show_percentage(true)
+                            .variant(ProgressVariant::Warning)
+                            .palette(palette)
+                            .spring_params(custom_spring_params)
+                            .show(ui);
+
+                        ui.add_space(10.0);
+                        ui.horizontal(|ui| {
+                            ui.label("Simulate Target:");
+                            for pct in [0.10, 0.35, 0.65, 0.90, 1.00] {
+                                if Button::new(format!("{:.0}%", pct * 100.0))
+                                    .small()
+                                    .palette(palette)
+                                    .show(ui)
+                                    .clicked()
+                                {
+                                    state.progress_value = pct;
+                                }
+                            }
+                        });
+                    });
+
+                ui.add_space(12.0);
+
+                Card::new()
+                    .title("Interactive Card with Hover Lift")
+                    .subtitle("Hover elevation lift and border glow morphing")
+                    .interactive(true)
+                    .palette(palette)
+                    .show(ui, |ui| {
+                        ui.label("Hover over this card to observe the spring-animated elevation lift and border highlight!");
+                        ui.add_space(4.0);
+                        Badge::new("Interactive Surface").accent().palette(palette).show(ui);
+                    });
+            }
+
+            WidgetsCategory::CompositeDashboard => {
+                use DashboardWidget::*;
+
+                // ── 1. Input Phase: keyboard navigation + actions ──
+                let ctx = ui.ctx().clone();
+
+                // Ensure focus is never None — self-heal to active section or default
+                if state.dash_nav.focused().is_none() {
+                    let sec = state.dash_section_nav.focused().copied().unwrap_or(DashSection::CoreEngine);
+                    let default_w = state.last_section_widget[sec as usize];
+                    state.dash_nav.set_focus_with_graph(Some(default_w), &state.dash_graph);
+                    state.dash_section_nav.set_focus(Some(sec));
+                }
+
+                let current_focused = state.dash_nav.focused().copied().unwrap_or(SwitchTurbo);
+
+                // If currently focused on a non-text widget, force stop egui text input
+                // so HJKL navigation and action keys are NEVER blocked by lingering text focus!
+                if !matches!(current_focused, SearchInput | TokenInput) {
+                    ctx.memory_mut(|m| m.stop_text_input());
+                }
+
+                // Suppress egui's default Tab focus cycling (unconditionally)
+                ctx.input_mut(|i| {
+                    i.consume_key(egui::Modifiers::NONE, egui::Key::Tab);
+                    i.consume_key(egui::Modifiers::SHIFT, egui::Key::Tab);
+                });
+
+                // 1. Direct Section Jumps via Ctrl+HJKL (Restores Last-Focused Widget in Target Section)
+                if let Some(sec_event) = state.dash_key_handler.handle_section_nav(
+                    &ctx,
+                    &mut state.dash_section_nav,
+                    &state.dash_section_graph,
+                ) {
+                    ctx.memory_mut(|m| m.stop_text_input());
+                    let entry = state.last_section_widget[sec_event.current as usize];
+                    state.dash_nav.set_focus_with_graph(Some(entry), &state.dash_graph);
+                }
+
+                // 2. 2-Pass Hierarchical Navigation (HJKL / Arrows without Ctrl)
+                if let Some(dir) = state.dash_key_handler.get_nav_direction(&ctx) {
+                    ctx.memory_mut(|m| m.stop_text_input());
+                    let current_widget = state.dash_nav.focused().copied().unwrap_or(SwitchTurbo);
+                    let current_section = widget_to_section(current_widget);
+
+                    // Pass 1: Try intra-section movement
+                    let mut moved_in_section = false;
+                    if let Some(event) = state.dash_nav.move_focus(&state.dash_graph, dir) {
+                        if widget_to_section(event.current) == current_section {
+                            moved_in_section = true;
+                            state.last_section_widget[current_section as usize] = event.current;
+                        } else {
+                            // Roll back if graph edge crossed section
+                            state.dash_nav.set_focus_with_graph(Some(current_widget), &state.dash_graph);
+                        }
+                    }
+
+                    // Pass 2: Boundary fallback — cross to adjacent section in section_graph
+                    if !moved_in_section {
+                        if let Some(sec_event) = state.dash_section_nav.move_focus(&state.dash_section_graph, dir) {
+                            let entry = section_entry_widget(
+                                sec_event.current,
+                                dir,
+                                state.last_section_widget[sec_event.current as usize],
+                            );
+                            state.dash_nav.set_focus_with_graph(Some(entry), &state.dash_graph);
+                            state.last_section_widget[sec_event.current as usize] = entry;
+                        }
+                    }
+                }
+
+                // Shift+H / Shift+L — adjust slider values when focused on a slider
+                {
+                    let focused = state.dash_nav.focused().copied();
+                    let shift_dir = ctx.input(|i| {
+                        if !i.modifiers.shift { return None; }
+                        if i.key_pressed(egui::Key::H) || i.key_pressed(egui::Key::ArrowLeft) {
+                            Some(-1.0f32)
+                        } else if i.key_pressed(egui::Key::L) || i.key_pressed(egui::Key::ArrowRight) {
+                            Some(1.0f32)
+                        } else {
+                            None
+                        }
+                    });
+                    if let Some(dir) = shift_dir {
+                        let step = 5.0; // step per keypress
+                        match focused {
+                            Some(SliderBandwidth) => {
+                                state.volume_slider = (state.volume_slider + dir * step).clamp(0.0, 100.0);
+                                ctx.request_repaint();
+                            }
+                            Some(SliderThermal) => {
+                                state.threshold_slider = (state.threshold_slider + dir * step).clamp(0.0, 100.0);
+                                ctx.request_repaint();
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+
+                // Action keys (F/Enter, D, Q/Esc)
+                let action = state.dash_key_handler.handle_action(&ctx);
+                let focused = state.dash_nav.focused().copied();
+
+                if let Some(VimAction::Back) = action {
+                    ctx.memory_mut(|m| m.stop_text_input());
+                }
+
+                // Handle non-button primary click actions (switches, checkboxes, radios)
+                if let Some(VimAction::PrimaryClick | VimAction::Enter) = action {
+                    match focused {
+                        Some(SwitchTurbo) => state.switch_turbo = !state.switch_turbo,
+                        Some(SwitchVpn) => state.switch_vpn = !state.switch_vpn,
+                        Some(SwitchAnalytics) => state.switch_analytics = !state.switch_analytics,
+                        Some(CheckNotify) => state.checkbox_newsletter = !state.checkbox_newsletter,
+                        Some(CheckMirror) => state.checkbox_telemetry = !state.checkbox_telemetry,
+                        Some(RadioDev) => state.radio_tier = 1,
+                        Some(RadioStaging) => state.radio_tier = 2,
+                        Some(RadioProd) => state.radio_tier = 3,
+                        _ => {}
+                    }
+                }
+
+                // ── 2. Layout Phase: render widgets, collect focused rect ──
+                let mut highlight_target: Option<Rect> = None;
+                let mut highlight_rounding = Rounding::same(6.0);
+                let mut section_target: Option<Rect> = None;
+                let section_rounding = Rounding::same(8.0);
+                let active_section = state.dash_section_nav.focused().copied()
+                    .unwrap_or(DashSection::CoreEngine);
+                let pointer_moved = ui.input(|i| i.pointer.delta() != Vec2::ZERO);
+
+                // Header
+                ui.horizontal(|ui| {
+                    ui.heading("🚀 Unified Control Center");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        Badge::new("System Nominal").success().dot(true).palette(palette).show(ui);
+                        Badge::new("Live Telemetry").accent().palette(palette).show(ui);
+                    });
+                });
+                ui.label("HJKL navigate • Ctrl+HJKL jump section • Shift+H/L adjust slider • F/Enter activate");
+                ui.add_space(10.0);
+
+                // ── Top Search Bar ──
+                let (search_card_resp, _) = Card::new()
+                    .palette(palette)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label("🔎 Quick Find:");
+
+                            let resp = TextInput::new(&mut state.search_term)
+                                .placeholder("Filter parameters, services, endpoints...")
+                                .icon("🔍")
+                                .clear_button(true)
+                                .palette(palette)
+                                .spring_params(custom_spring_params)
+                                .show(ui);
+                            if (resp.hovered() && pointer_moved) || resp.clicked() {
+                                state.record_widget_focus(SearchInput);
+                            }
+                            if focused == Some(SearchInput) {
+                                highlight_target = Some(resp.rect);
+                                highlight_rounding = Rounding::same(6.0);
+                            }
+
+                            let is_scan_focused = focused == Some(ScanButton);
+                            let is_scan_triggered = is_scan_focused && matches!(action, Some(VimAction::PrimaryClick | VimAction::Enter));
+                            let resp = Button::new("Scan Network")
+                                .primary()
+                                .icon("📡")
+                                .palette(palette)
+                                .spring_params(custom_spring_params)
+                                .id_source(egui::Id::new("dash_btn").with(ScanButton as u32))
+                                .focused(is_scan_focused)
+                                .triggered(is_scan_triggered)
+                                .show(ui);
+                            if (resp.hovered() && pointer_moved) || resp.clicked() {
+                                state.record_widget_focus(ScanButton);
+                            }
+                            if resp.clicked() || is_scan_triggered {
+                                state.progress_value = 0.88;
+                            }
+                            if is_scan_focused {
+                                highlight_target = Some(resp.rect);
+                                highlight_rounding = Rounding::same(6.0);
+                            }
+
+                            let is_clear_focused = focused == Some(ClearButton);
+                            let is_clear_triggered = is_clear_focused && matches!(action, Some(VimAction::PrimaryClick | VimAction::Enter));
+                            let resp = Button::new("Clear")
+                                .secondary()
+                                .palette(palette)
+                                .spring_params(custom_spring_params)
+                                .id_source(egui::Id::new("dash_btn").with(ClearButton as u32))
+                                .focused(is_clear_focused)
+                                .triggered(is_clear_triggered)
+                                .show(ui);
+                            if (resp.hovered() && pointer_moved) || resp.clicked() {
+                                state.record_widget_focus(ClearButton);
+                            }
+                            if resp.clicked() || is_clear_triggered {
+                                state.search_term.clear();
+                            }
+                            if is_clear_focused {
+                                highlight_target = Some(resp.rect);
+                                highlight_rounding = Rounding::same(6.0);
+                            }
+                        });
+                    });
+                if active_section == DashSection::SearchBar {
+                    section_target = Some(search_card_resp.rect);
+                }
+
+                ui.add_space(10.0);
+
+                // ── Two-column layout ──
+                ui.columns(2, |columns| {
+                    // ════ Column 1: Core Engine & Services ════
+                    columns[0].vertical(|ui| {
+                        let (core_card_resp, _) = Card::new()
+                            .title("⚡ Core Engine & Services")
+                            .subtitle("Network protocols and hardware accelerators")
+                            .palette(palette)
+                            .show(ui, |ui| {
+                                let resp = Switch::new(&mut state.switch_turbo)
+                                    .label("Turbo Mode")
+                                    .palette(palette)
+                                    .spring_params(custom_spring_params)
+                                    .show(ui);
+                                if (resp.hovered() && pointer_moved) || resp.clicked() {
+                                    state.record_widget_focus(SwitchTurbo);
+                                }
+                                if focused == Some(SwitchTurbo) { highlight_target = Some(resp.rect); }
+
+                                let resp = Switch::new(&mut state.switch_vpn)
+                                    .label("Secure Gateway Tunnel")
+                                    .palette(palette)
+                                    .spring_params(custom_spring_params)
+                                    .show(ui);
+                                if (resp.hovered() && pointer_moved) || resp.clicked() {
+                                    state.record_widget_focus(SwitchVpn);
+                                }
+                                if focused == Some(SwitchVpn) { highlight_target = Some(resp.rect); }
+
+                                let resp = Switch::new(&mut state.switch_analytics)
+                                    .label("Realtime Telemetry Ingestion")
+                                    .palette(palette)
+                                    .spring_params(custom_spring_params)
+                                    .show(ui);
+                                if (resp.hovered() && pointer_moved) || resp.clicked() {
+                                    state.record_widget_focus(SwitchAnalytics);
+                                }
+                                if focused == Some(SwitchAnalytics) { highlight_target = Some(resp.rect); }
+
+                                ui.add_space(4.0);
+                                ui.separator();
+                                ui.add_space(4.0);
+
+                                ui.label("Bandwidth Throttle:");
+                                let resp = Slider::new(&mut state.volume_slider, 0.0..=100.0)
+                                    .suffix(" MB/s")
+                                    .palette(palette)
+                                    .spring_params(custom_spring_params)
+                                    .show(ui);
+                                if (resp.hovered() && pointer_moved) || resp.dragged() {
+                                    state.record_widget_focus(SliderBandwidth);
+                                }
+                                if focused == Some(SliderBandwidth) { highlight_target = Some(resp.rect); }
+
+                                ui.add_space(4.0);
+                                ui.label("Thermal Cutoff Threshold:");
+                                let resp = Slider::new(&mut state.threshold_slider, 0.0..=100.0)
+                                    .suffix(" °C")
+                                    .palette(palette)
+                                    .spring_params(custom_spring_params)
+                                    .show(ui);
+                                if (resp.hovered() && pointer_moved) || resp.dragged() {
+                                    state.record_widget_focus(SliderThermal);
+                                }
+                                if focused == Some(SliderThermal) { highlight_target = Some(resp.rect); }
+                            });
+                        if active_section == DashSection::CoreEngine {
+                            section_target = Some(core_card_resp.rect);
+                        }
+
+                        ui.add_space(10.0);
+
+                        // Pipeline Sync Card
+                        let (pipeline_card_resp, _) = Card::new()
+                            .title("📊 Live Pipeline Synchronization")
+                            .subtitle("Physical spring ODE catchup meter")
+                            .palette(palette)
+                            .show(ui, |ui| {
+                                egui_widgets::ProgressBar::new(state.progress_value)
+                                    .label("Cluster Ingestion Sync")
+                                    .show_percentage(true)
+                                    .variant(if state.progress_value > 0.8 {
+                                        ProgressVariant::Success
+                                    } else {
+                                        ProgressVariant::Accent
+                                    })
+                                    .palette(palette)
+                                    .spring_params(custom_spring_params)
+                                    .show(ui);
+
+                                ui.add_space(8.0);
+                                ui.horizontal(|ui| {
+                                    for (id, label, val) in [
+                                        (ProgressBtn25, "25%", 0.25),
+                                        (ProgressBtn50, "50%", 0.50),
+                                        (ProgressBtn75, "75%", 0.75),
+                                        (ProgressBtn100, "100%", 1.00),
+                                    ] {
+                                        let is_btn_focused = focused == Some(id);
+                                        let is_btn_triggered = is_btn_focused && matches!(action, Some(VimAction::PrimaryClick | VimAction::Enter));
+                                        let is_active = (state.progress_value - val).abs() < 0.02;
+                                        let mut btn = Button::new(label)
+                                            .min_size(egui::vec2(52.0, 26.0))
+                                            .palette(palette)
+                                            .spring_params(custom_spring_params)
+                                            .id_source(egui::Id::new("dash_btn").with(id as u32))
+                                            .focused(is_btn_focused)
+                                            .triggered(is_btn_triggered);
+                                        if is_active {
+                                            btn = btn.primary();
+                                        } else {
+                                            btn = btn.secondary();
+                                        }
+                                        let resp = btn.show(ui);
+                                        if (resp.hovered() && pointer_moved) || resp.clicked() {
+                                            state.record_widget_focus(id);
+                                        }
+                                        if resp.clicked() || is_btn_triggered {
+                                            state.progress_value = val;
+                                        }
+                                        if is_btn_focused {
+                                            highlight_target = Some(resp.rect);
+                                            highlight_rounding = Rounding::same(6.0);
+                                        }
+                                    }
+                                });
+                            });
+                        if active_section == DashSection::PipelineSync {
+                            section_target = Some(pipeline_card_resp.rect);
+                        }
+                    });
+
+                    // ════ Column 2: Security & Actions ════
+                    columns[1].vertical(|ui| {
+                        let (security_card_resp, _) = Card::new()
+                            .title("🔒 Security & Deployment Tier")
+                            .subtitle("Access keys and environment targeting")
+                            .palette(palette)
+                            .show(ui, |ui| {
+                                // Token Input
+                                let resp = TextInput::new(&mut state.token_input)
+                                    .placeholder("Authorization secret key...")
+                                    .icon("🔑")
+                                    .password(true)
+                                    .clear_button(true)
+                                    .palette(palette)
+                                    .spring_params(custom_spring_params)
+                                    .show(ui);
+                                if (resp.hovered() && pointer_moved) || resp.clicked() {
+                                    state.record_widget_focus(TokenInput);
+                                }
+                                if focused == Some(TokenInput) { highlight_target = Some(resp.rect); }
+
+                                ui.add_space(10.0);
+                                ui.label("Target Cluster Tier:");
+                                ui.horizontal(|ui| {
+                                    for (id, value, label) in [
+                                        (RadioDev, 1, "Dev"),
+                                        (RadioStaging, 2, "Staging"),
+                                        (RadioProd, 3, "Production"),
+                                    ] {
+                                        let resp = RadioButton::new(value, &mut state.radio_tier)
+                                            .label(label)
+                                            .palette(palette)
+                                            .show(ui);
+                                        if (resp.hovered() && pointer_moved) || resp.clicked() {
+                                            state.record_widget_focus(id);
+                                        }
+                                        if focused == Some(id) {
+                                            highlight_target = Some(resp.rect);
+                                            highlight_rounding = Rounding::same(4.0);
+                                        }
+                                    }
+                                });
+
+                                ui.add_space(10.0);
+                                ui.separator();
+                                ui.add_space(6.0);
+
+                                // Checkbox: Notify
+                                let resp = Checkbox::new(&mut state.checkbox_newsletter)
+                                    .label("Auto-notify on deployment rollback")
+                                    .palette(palette)
+                                    .spring_params(custom_spring_params)
+                                    .show(ui);
+                                if (resp.hovered() && pointer_moved) || resp.clicked() {
+                                    state.record_widget_focus(CheckNotify);
+                                }
+                                if focused == Some(CheckNotify) { highlight_target = Some(resp.rect); }
+
+                                ui.add_space(4.0);
+
+                                // Checkbox: Mirror
+                                let resp = Checkbox::new(&mut state.checkbox_telemetry)
+                                    .label("Mirror replication to backup region")
+                                    .palette(palette)
+                                    .spring_params(custom_spring_params)
+                                    .show(ui);
+                                if (resp.hovered() && pointer_moved) || resp.clicked() {
+                                    state.record_widget_focus(CheckMirror);
+                                }
+                                if focused == Some(CheckMirror) { highlight_target = Some(resp.rect); }
+                            });
+                        if active_section == DashSection::Security {
+                            section_target = Some(security_card_resp.rect);
+                        }
+
+                        ui.add_space(10.0);
+
+                        // Action Dispatcher Card
+                        let (action_card_resp, _) = Card::new()
+                            .title("🚀 Action Dispatcher")
+                            .subtitle("Trigger instant operations across cluster")
+                            .palette(palette)
+                            .show(ui, |ui| {
+                                ui.horizontal_wrapped(|ui| {
+                                    for (id, label, icon, style, prog_val) in [
+                                        (BtnDeploy, "Deploy Cluster", "🚀", "primary", Some(1.0f32)),
+                                        (BtnVerify, "Verify Status", "✓", "success", Some(0.95)),
+                                        (BtnPurge, "Purge Cache", "🧹", "warning", Some(0.10)),
+                                        (BtnHalt, "Emergency Halt", "🛑", "danger", None),
+                                    ] {
+                                        let is_btn_focused = focused == Some(id);
+                                        let is_btn_triggered = is_btn_focused && matches!(action, Some(VimAction::PrimaryClick | VimAction::Enter));
+                                        let mut btn = Button::new(label)
+                                            .icon(icon)
+                                            .palette(palette)
+                                            .spring_params(custom_spring_params)
+                                            .id_source(egui::Id::new("dash_btn").with(id as u32))
+                                            .focused(is_btn_focused)
+                                            .triggered(is_btn_triggered);
+                                        btn = match style {
+                                            "primary" => btn.primary(),
+                                            "success" => btn.success(),
+                                            "warning" => btn.warning(),
+                                            "danger" => btn.danger(),
+                                            _ => btn,
+                                        };
+                                        let resp = btn.show(ui);
+                                        if (resp.hovered() && pointer_moved) || resp.clicked() {
+                                            state.record_widget_focus(id);
+                                        }
+                                        if resp.clicked() || is_btn_triggered {
+                                            if let Some(v) = prog_val { state.progress_value = v; }
+                                        }
+                                        if is_btn_focused {
+                                            highlight_target = Some(resp.rect);
+                                            highlight_rounding = Rounding::same(6.0);
+                                        }
+                                    }
+                                });
+
+                                ui.add_space(8.0);
+                                ui.horizontal(|ui| {
+                                    Badge::new("Latency: 14ms").info().palette(palette).show(ui);
+                                    Badge::new("Uptime: 99.98%").success().palette(palette).show(ui);
+                                    Badge::new("Nodes: 24/24").accent().palette(palette).show(ui);
+                                });
+                            });
+                        if active_section == DashSection::ActionDispatcher {
+                            section_target = Some(action_card_resp.rect);
+                        }
+                    });
+                });
+
+                // ── 3. Retarget + Update + Paint Phase ──
+                // Synchronize highlight styling with active ThemePalette and physics tuner
+                if let Some(item_layer) = state.dash_highlights.get_mut(&DashHighlight::Item) {
+                    item_layer.fill_color = egui::Color32::from_rgba_unmultiplied(palette.accent.r(), palette.accent.g(), palette.accent.b(), 35);
+                    item_layer.stroke = Stroke::new(2.0, palette.accent);
+                    item_layer.set_motion(MotionPhysics::Custom(custom_spring_params));
+                }
+                if let Some(section_layer) = state.dash_highlights.get_mut(&DashHighlight::Section) {
+                    section_layer.fill_color = egui::Color32::from_rgba_unmultiplied(palette.surface1.r(), palette.surface1.g(), palette.surface1.b(), 20);
+                    section_layer.stroke = Stroke::new(1.5, egui::Color32::from_rgba_unmultiplied(palette.accent.r(), palette.accent.g(), palette.accent.b(), 120));
+                }
+
+                if let Some(target) = section_target {
+                    state.dash_highlights.set_target_with_corner_rounding(
+                        &DashHighlight::Section,
+                        target,
+                        section_rounding,
+                    );
+                }
+
+                if let Some(target) = highlight_target {
+                    state.dash_highlights.set_target_with_corner_rounding(
+                        &DashHighlight::Item,
+                        target,
+                        highlight_rounding,
+                    );
+                }
+
+                let dt = ui.input(|i| i.stable_dt).min(0.05);
+                state.dash_highlights.update(dt);
+
+                if !state.dash_highlights.is_settled() {
+                    ui.ctx().request_repaint();
+                }
+
+                state.dash_highlights.paint_all(ui.painter());
+            }
+        }
+    });
+}
