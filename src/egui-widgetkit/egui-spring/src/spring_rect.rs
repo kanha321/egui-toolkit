@@ -55,7 +55,7 @@ impl SpringRect {
             motion: default_motion,
             corners: CornerSprings::new(target_rect, default_params.angular_frequency, default_params.damping_ratio),
             alpha_spring: Spring::new(1.0, SpringParams::new(24.0, 0.75)),
-            fill_color: Color32::from_rgba_unmultiplied(0, 255, 136, 14),
+            fill_color: Color32::TRANSPARENT,
             stroke: Stroke::new(1.5, Color32::from_rgb(0, 255, 136)),
             target_rounding: default_rounding,
             start_rounding: default_rounding,
@@ -221,6 +221,18 @@ impl SpringRect {
     /// Retargets the spring highlight with uniform target rounding for morphing.
     pub fn set_target_with_rounding(&mut self, target: Rect, rounding: f32) {
         self.set_target_with_corner_rounding(target, Rounding::same(rounding));
+    }
+
+    /// Teleports the highlight immediately to `rect` and `rounding` without animation, zeroing momentum.
+    pub fn reset_to(&mut self, rect: Rect, rounding: Rounding) {
+        self.corners.reset(rect);
+        self.corners.target_rect = rect;
+        self.target_rounding = rounding;
+        self.current_rounding = rounding;
+        self.start_rounding = rounding;
+        self.start_center = rect.center();
+        self.target_center = rect.center();
+        self.alpha_spring.reset(1.0);
     }
 
     /// Retargets the spring highlight with asymmetric per-corner rounding for morphing.

@@ -26,6 +26,12 @@ pub fn one_dark_pro() -> ThemePalette {
         info: Color32::from_rgb(97, 175, 239), // Blue
         info_alt: Color32::from_rgb(86, 182, 194), // Cyan
         sys_controls: Color32::from_rgb(97, 175, 239),
+        on_accent: Color32::from_rgb(33, 37, 43),
+        on_surface: Color32::from_rgb(171, 178, 191),
+        on_success: Color32::from_rgb(33, 37, 43),
+        on_warning: Color32::from_rgb(33, 37, 43),
+        on_danger: Color32::from_rgb(33, 37, 43),
+        on_info: Color32::from_rgb(33, 37, 43),
         swatches: vec![
             Color32::from_rgb(224, 108, 117),
             Color32::from_rgb(209, 154, 102),

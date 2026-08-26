@@ -11,20 +11,61 @@ use egui::{
     pos2, vec2, Align2, Color32, FontId, Id, Rect, Response, Rounding, Sense, Shape, Stroke,
     TextEdit, TextStyle, Ui, Vec2, WidgetText,
 };
+use egui_spring::SpringCursor;
 use egui_themes::ThemePalette;
+use egui_vim_nav::{VimBufferState, VimMode};
 use spring_core::{Spring, SpringParams};
 
 /// Persistent animation state for text input focus effects.
+/// Represents a deleted text slice being physically wiped/faded away by the reversing spring cursor.
+#[derive(Clone, Debug)]
+pub struct DeletedSegment {
+    /// The string slice that was deleted.
+    pub text: String,
+    /// Character offset in the text where deletion occurred.
+    pub char_offset: usize,
+    /// Spring driving continuous alpha fade out of this deleted segment ($1.0 \to 0.0$).
+    pub fade_spring: Spring,
+}
+
+impl DeletedSegment {
+    pub fn new(text: String, char_offset: usize) -> Self {
+        let mut spring = Spring::new(1.0, SpringParams::new(26.0, 0.70));
+        spring.set_target(0.0);
+        Self {
+            text,
+            char_offset,
+            fade_spring: spring,
+        }
+    }
+}
+
+/// Persistent animation state for text inputs with spring-animated focus rings.
 #[derive(Clone, Debug)]
 pub struct InputState {
     /// Spring driving focus glow ring expansion ($0.0 \to 1.0$).
     pub focus_spring: Spring,
+    /// Spring driving fluid 4-corner cursor motion physics and highlight morphing.
+    pub cursor_spring: SpringCursor,
+    /// Buffer of pre-deletion text string (legacy field preserved for compatibility).
+    pub deleted_text_buffer: Option<String>,
+    /// Deleted text segment undergoing physical cursor wipe animation.
+    pub deleted_segment: Option<DeletedSegment>,
+    /// Tracks previous focus state to implement the 1-Frame Activation Shield.
+    pub was_focused: bool,
+    /// Smoothly interpolated mode stroke color for crossfading between Vim modes.
+    pub current_mode_color: Option<Color32>,
 }
 
 impl Default for InputState {
     fn default() -> Self {
         Self {
             focus_spring: Spring::new(0.0, SpringParams::new(26.0, 0.46)),
+            cursor_spring: SpringCursor::new(SpringParams::new(26.0, 0.52)),
+            deleted_text_buffer: None,
+            deleted_segment: None,
+            was_focused: false,
+            current_mode_color: None,
         }
     }
 }
@@ -38,14 +79,23 @@ impl InputState {
         self.focus_spring.set_target(if is_focused { 1.0 } else { 0.0 });
         self.focus_spring.update(dt);
 
+        if let Some(ref mut del) = self.deleted_segment {
+            del.fade_spring.update(dt);
+            if del.fade_spring.is_settled() {
+                self.deleted_segment = None;
+            }
+        }
+
         if !self.is_settled() {
             ctx.request_repaint();
         }
     }
 
-    /// Returns `true` if focus spring has settled.
+    /// Returns `true` if all focus and cursor springs have settled.
     pub fn is_settled(&self) -> bool {
         self.focus_spring.is_settled()
+            && self.cursor_spring.is_settled()
+            && self.deleted_segment.as_ref().map_or(true, |d| d.fade_spring.is_settled())
     }
 }
 
@@ -77,11 +127,18 @@ pub struct TextInput<'a> {
     rounding: Option<Rounding>,
     padding: Vec2,
     min_width: f32,
+    desired_width: Option<f32>,
+    desired_height: Option<f32>,
+    glow_ring: bool,
     spring_params: SpringParams,
     motion: bool,
     palette: Option<&'a ThemePalette>,
     id_source: Option<Id>,
     external_state: Option<&'a mut InputState>,
+    vim_buffer: Option<&'a mut VimBufferState>,
+    focused: bool,
+    editing: bool,
+    mode_indicator: bool,
 }
 
 impl<'a> TextInput<'a> {
@@ -100,12 +157,43 @@ impl<'a> TextInput<'a> {
             rounding: None,
             padding: vec2(10.0, 6.0),
             min_width: 140.0,
+            desired_width: None,
+            desired_height: None,
+            glow_ring: false,
             spring_params: SpringParams::new(26.0, 0.46),
             motion: true,
             palette: None,
             id_source: None,
             external_state: None,
+            vim_buffer: None,
+            focused: false,
+            editing: false,
+            mode_indicator: true,
         }
+    }
+
+    /// Sets whether to display the mode indicator label (`[NOR]`, `[INS]`) on the right.
+    pub fn mode_indicator(mut self, show: bool) -> Self {
+        self.mode_indicator = show;
+        self
+    }
+
+    /// Binds an external [`VimBufferState`] to enable pure Vim modal editing.
+    pub fn vim_buffer(mut self, buffer: &'a mut VimBufferState) -> Self {
+        self.vim_buffer = Some(buffer);
+        self
+    }
+
+    /// Sets whether this text input is selected by Vim navigation.
+    pub fn focused(mut self, focused: bool) -> Self {
+        self.focused = focused;
+        self
+    }
+
+    /// Sets whether this text input is actively in typing/editing mode.
+    pub fn editing(mut self, editing: bool) -> Self {
+        self.editing = editing;
+        self
     }
 
     /// Sets placeholder hint text.
@@ -174,6 +262,30 @@ impl<'a> TextInput<'a> {
         self
     }
 
+    /// Sets explicit desired width in pixels.
+    pub fn width(mut self, width: f32) -> Self {
+        self.desired_width = Some(width);
+        self
+    }
+
+    /// Sets explicit desired width in pixels.
+    pub fn desired_width(mut self, width: f32) -> Self {
+        self.desired_width = Some(width);
+        self
+    }
+
+    /// Sets explicit desired height in pixels (default `32.0`).
+    pub fn height(mut self, height: f32) -> Self {
+        self.desired_height = Some(height);
+        self
+    }
+
+    /// Enables or disables the outer expanding focus glow ring (default `true`).
+    pub fn glow_ring(mut self, show: bool) -> Self {
+        self.glow_ring = show;
+        self
+    }
+
     /// Sets custom spring physics parameters for the focus ring.
     pub fn spring_params(mut self, params: SpringParams) -> Self {
         self.spring_params = params;
@@ -205,18 +317,24 @@ impl<'a> TextInput<'a> {
     }
 
     /// Renders the text input into the UI.
-    pub fn show(self, ui: &mut Ui) -> Response {
-        let height = 32.0;
-        let available_w = ui.available_width().max(self.min_width);
-        let desired_size = vec2(available_w, height);
+    pub fn show(mut self, ui: &mut Ui) -> Response {
+        let height = self.desired_height.unwrap_or(32.0);
+        let width = if let Some(w) = self.desired_width {
+            w.max(self.min_width)
+        } else if ui.layout().main_dir() == egui::Direction::LeftToRight {
+            240.0f32.min(ui.available_width()).max(self.min_width)
+        } else {
+            ui.available_width().max(self.min_width)
+        };
+        let desired_size = vec2(width, height);
 
-        let (rect, mut response) = ui.allocate_exact_size(desired_size, Sense::click());
+        let (rect, response) = ui.allocate_exact_size(desired_size, Sense::hover());
 
         // Resolve colors
         let (bg_fill, base_stroke, focus_stroke, text_color, placeholder_color) =
             if let Some(p) = self.palette {
                 (
-                    self.fill.unwrap_or(p.surface0),
+                    self.fill.unwrap_or(p.crust),
                     self.stroke.unwrap_or(Stroke::new(1.0, p.surface1)),
                     self.focus_stroke.unwrap_or(Stroke::new(1.5, p.accent)),
                     self.text_color.unwrap_or(p.text),
@@ -234,16 +352,17 @@ impl<'a> TextInput<'a> {
             };
 
         let rounding = self.rounding.unwrap_or(Rounding::same(6.0));
+        let dt = ui.input(|i| i.stable_dt).min(0.05);
 
         // Sub-layout for internal TextEdit
         let mut left_offset = self.padding.x;
         let mut right_offset = self.padding.x;
 
         if self.icon.is_some() {
-            left_offset += 18.0;
+            left_offset += 20.0;
         }
         if self.clear_button && !self.text.is_empty() {
-            right_offset += 20.0;
+            right_offset += 22.0;
         }
 
         let edit_rect = Rect::from_min_max(
@@ -251,114 +370,41 @@ impl<'a> TextInput<'a> {
             pos2(rect.right() - right_offset, rect.bottom() - self.padding.y),
         );
 
-        let mut edit = TextEdit::singleline(self.text)
-            .password(self.password)
-            .text_color(text_color)
-            .frame(false);
-
-        if let Some(ph) = self.placeholder {
-            edit = edit.hint_text(WidgetText::from(ph).color(placeholder_color));
-        }
-
-        let edit_response = ui.put(edit_rect, edit);
-        let has_focus = edit_response.has_focus();
-
-        // Release text edit focus on Escape, Enter, or Ctrl navigation shortcuts
-        if has_focus && ui.input(|i| {
-            i.key_pressed(egui::Key::Escape) || i.key_pressed(egui::Key::Enter) || (i.modifiers.ctrl && (
-                i.key_pressed(egui::Key::H) || i.key_pressed(egui::Key::J) || i.key_pressed(egui::Key::K) || i.key_pressed(egui::Key::L)
-                || i.key_pressed(egui::Key::ArrowLeft) || i.key_pressed(egui::Key::ArrowDown) || i.key_pressed(egui::Key::ArrowUp) || i.key_pressed(egui::Key::ArrowRight)
-            ))
-        }) {
-            edit_response.surrender_focus();
-        }
-
-        if edit_response.changed() {
-            response.mark_changed();
-        }
-
-        // Motion physics for focus glow ring
-        let dt = ui.input(|i| i.stable_dt).min(0.05);
-
-        let focus_factor = if self.motion {
-            if let Some(state) = self.external_state {
-                state.update(dt, has_focus, ui.ctx());
-                state.focus_spring.value()
+        let id = self.id_source.unwrap_or_else(|| {
+            if let Some(p) = self.placeholder {
+                ui.make_persistent_id(p)
             } else {
-                let id = self.id_source.unwrap_or_else(|| {
-                    if let Some(p) = self.placeholder {
-                        ui.make_persistent_id(p)
-                    } else {
-                        response.id
-                    }
-                });
-                let mut state: InputState = ui.data_mut(|d| {
-                    d.get_temp(id).unwrap_or_default()
-                });
-
-                state.update(dt, has_focus, ui.ctx());
-                let val = state.focus_spring.value();
-                ui.data_mut(|d| d.insert_temp(id, state));
-                val
+                response.id
             }
-        } else {
-            if has_focus { 1.0 } else { 0.0 }
-        };
+        });
 
-        // Quick clear button interaction
-        let mut clear_clicked = false;
-        let mut clear_hovered = false;
-        let clear_rect = if self.clear_button && !self.text.is_empty() {
-            let r = Rect::from_center_size(
-                pos2(rect.right() - 14.0, rect.center().y),
-                vec2(16.0, 16.0),
-            );
-            if let Some(pos) = ui.input(|i| i.pointer.hover_pos()) {
-                if r.contains(pos) {
-                    clear_hovered = true;
-                    if ui.input(|i| i.pointer.primary_clicked()) {
-                        clear_clicked = true;
-                    }
-                }
-            }
-            Some(r)
+        let mut temp_state = if self.external_state.is_none() {
+            Some(ui.data_mut(|d| d.get_temp::<InputState>(id).unwrap_or_default()))
         } else {
             None
         };
 
-        if clear_clicked {
-            self.text.clear();
-            response.mark_changed();
-        }
+        let state: &mut InputState = if let Some(ref mut ext) = self.external_state {
+            ext
+        } else {
+            temp_state.as_mut().unwrap()
+        };
 
+        state.focus_spring.params = self.spring_params;
+        state.cursor_spring.set_spring_params(self.spring_params);
+
+        state.update(dt, self.focused, ui.ctx());
+
+        // 1. Paint background, glow ring, and border BEFORE TextEdit so text is drawn on top!
         if ui.is_rect_visible(rect) {
             let painter = ui.painter();
 
             // Background
             painter.add(Shape::rect_filled(rect, rounding, bg_fill));
 
-            // Outer expanding focus glow ring
-            if focus_factor > 0.01 {
-                let expand = (focus_factor * 2.5).max(0.0);
-                let glow_rect = rect.expand(expand);
-                let glow_stroke = Stroke::new(
-                    1.5,
-                    focus_stroke.color.linear_multiply(0.40 * focus_factor.clamp(0.0, 1.0)),
-                );
-                painter.add(Shape::rect_stroke(glow_rect, Rounding::same(rounding.nw + expand), glow_stroke));
-            }
-
-            // Animated border stroke
-            let current_stroke = if focus_factor > 0.01 {
-                let color = lerp_color(base_stroke.color, focus_stroke.color, focus_factor.clamp(0.0, 1.0));
-                let width = base_stroke.width + (focus_stroke.width - base_stroke.width) * focus_factor.clamp(0.0, 1.0);
-                Stroke::new(width, color)
-            } else {
-                base_stroke
-            };
-
-            if current_stroke.width > 0.0 {
-                painter.add(Shape::rect_stroke(rect, rounding, current_stroke));
+            // Static base border stroke (clean boundary; focus highlighting is owned by outer SpringRect)
+            if base_stroke.width > 0.0 {
+                painter.add(Shape::rect_stroke(rect, rounding, base_stroke));
             }
 
             // Leading icon
@@ -373,37 +419,457 @@ impl<'a> TextInput<'a> {
                     rect.left() + self.padding.x,
                     rect.center().y - icon_galley.size().y * 0.5,
                 );
-                let icon_color = if has_focus {
+                let icon_color = if self.focused {
                     focus_stroke.color
                 } else {
                     placeholder_color
                 };
                 painter.galley(icon_pos, icon_galley, icon_color);
             }
+        }
 
-            // Quick clear button render
-            if let Some(c_rect) = clear_rect {
-                let clear_color = if clear_hovered {
-                    text_color
+        // 2. Render text and caret
+        let mut vim_mode_info = None;
+        let edit_response = if let Some(vbuf) = self.vim_buffer {
+            // Synchronize text if caller modified it externally
+            if vbuf.text() != self.text.as_str() {
+                vbuf.set_text(self.text.as_str());
+            }
+
+            // 1-Frame Activation Shield:
+            // When transitioning from unfocused -> focused on this frame,
+            // the activation keystroke (e.g. 'i', 'a', 'Enter', 'Space') in egui's
+            // event queue belongs to the UI navigator layer, NOT to the internal text buffer.
+            // Skip processing input on this activation frame to guarantee zero event leak.
+            let just_activated = self.focused && !state.was_focused;
+            state.was_focused = self.focused;
+
+            // Let Vim engine process input when focused (excluding the initial activation frame)
+            if self.focused && !just_activated {
+                vbuf.handle_input(ui.ctx());
+                *self.text = vbuf.text().to_owned();
+            } else if just_activated {
+                *self.text = vbuf.text().to_owned();
+            }
+
+            let mode = vbuf.mode();
+            let pending = vbuf.parser.pending_keys_label();
+
+            let target_mode_color = resolve_vim_mode_color(mode, self.palette, ui.visuals());
+            let cur_mode_col = state.current_mode_color.unwrap_or(target_mode_color);
+            let smoothed_mode_color = lerp_color(cur_mode_col, target_mode_color, (dt * 16.0).clamp(0.0, 1.0));
+            state.current_mode_color = Some(smoothed_mode_color);
+            if smoothed_mode_color != target_mode_color {
+                ui.ctx().request_repaint();
+            }
+
+            vim_mode_info = Some((mode, pending, smoothed_mode_color));
+
+            let resp = ui.interact(
+                edit_rect,
+                ui.make_persistent_id(self.placeholder.unwrap_or("vim_input")),
+                Sense::click(),
+            );
+            if resp.clicked() {
+                vbuf.mode = VimMode::Insert;
+            }
+
+            if ui.is_rect_visible(edit_rect) {
+                let painter = ui.painter().with_clip_rect(edit_rect);
+                let font_id = FontId::monospace(13.0);
+
+                // Update deleted segment fade spring
+                if let Some(ref mut del) = state.deleted_segment {
+                    del.fade_spring.update(dt);
+                    if del.fade_spring.is_settled() {
+                        state.deleted_segment = None;
+                    } else {
+                        ui.ctx().request_repaint();
+                    }
+                }
+
+                // Base text is ALWAYS the current valid text (100% stable, unclipped in normal mode, never disappears!)
+                let display_text = if self.password {
+                    "•".repeat(self.text.chars().count())
                 } else {
-                    placeholder_color
+                    self.text.clone()
                 };
-                painter.text(
-                    c_rect.center(),
-                    Align2::CENTER_CENTER,
-                    "✖",
-                    FontId::monospace(10.0),
-                    clear_color,
+
+                let galley = painter.layout_no_wrap(display_text, font_id.clone(), text_color);
+                // Stabilized vertical baseline: prevents 8px jumping when text transitions between empty and non-empty
+                let text_pos = pos2(edit_rect.left(), edit_rect.center().y - 8.0);
+
+                // Compute target character rect for the fluid spring cursor based on the CURRENT text and mode
+                let (target_caret_rect, target_rounding, fill_mult, stroke_width) = if self.text.is_empty() {
+                    let caret_x = edit_rect.left();
+                    match mode {
+                        VimMode::Insert => (
+                            Rect::from_min_size(
+                                pos2(caret_x, edit_rect.center().y - 8.0),
+                                vec2(1.8, 16.0),
+                            ),
+                            0.5,
+                            1.0,
+                            0.0,
+                        ),
+                        VimMode::Replace => (
+                            Rect::from_min_size(
+                                pos2(caret_x, edit_rect.center().y + 5.0),
+                                vec2(8.0, 3.0),
+                            ),
+                            0.5,
+                            1.0,
+                            1.0,
+                        ),
+                        VimMode::OperatorPending { operator, .. } => {
+                            use egui_vim_nav::VimOperator;
+                            match operator {
+                                VimOperator::Delete => (
+                                    Rect::from_min_size(
+                                        pos2(caret_x, edit_rect.center().y),
+                                        vec2(8.0, 8.0),
+                                    ),
+                                    1.0,
+                                    0.35,
+                                    1.5,
+                                ),
+                                VimOperator::Change => (
+                                    Rect::from_min_size(
+                                        pos2(caret_x, edit_rect.center().y - 8.0),
+                                        vec2(8.0, 8.0),
+                                    ),
+                                    1.0,
+                                    0.35,
+                                    1.5,
+                                ),
+                                VimOperator::Yank => (
+                                    Rect::from_min_size(
+                                        pos2(caret_x, edit_rect.center().y - 8.0),
+                                        vec2(8.0, 16.0),
+                                    ),
+                                    1.5,
+                                    0.0,
+                                    2.0,
+                                ),
+                                _ => (
+                                    Rect::from_min_size(
+                                        pos2(caret_x, edit_rect.center().y),
+                                        vec2(8.0, 8.0),
+                                    ),
+                                    1.0,
+                                    0.35,
+                                    1.5,
+                                ),
+                            }
+                        }
+                        _ => (
+                            Rect::from_min_size(
+                                pos2(caret_x, edit_rect.center().y - 8.0),
+                                vec2(8.0, 16.0),
+                            ),
+                            1.5,
+                            0.50,
+                            1.5,
+                        ),
+                    }
+                } else {
+                    let cursor_char_idx = self.text[..vbuf.cursor.min(self.text.len())].chars().count();
+                    let cur = galley.from_ccursor(egui::text::CCursor::new(cursor_char_idx));
+                    let cur_rect = galley.pos_from_cursor(&cur);
+                    let caret_x = text_pos.x + cur_rect.left();
+                    let next_cur = galley.from_ccursor(egui::text::CCursor::new(cursor_char_idx + 1));
+                    let next_rect = galley.pos_from_cursor(&next_cur);
+                    let char_w = (next_rect.left() - cur_rect.left()).max(8.0);
+
+                    match mode {
+                        VimMode::Normal => {
+                            if vbuf.parser.is_pending_find() {
+                                // Find target pending (f, t, F, T) -> hollow targeting frame
+                                (
+                                    Rect::from_min_size(
+                                        pos2(caret_x, edit_rect.center().y - 8.0),
+                                        vec2(char_w, 16.0),
+                                    ),
+                                    1.5,
+                                    0.20,
+                                    1.5,
+                                )
+                            } else {
+                                (
+                                    Rect::from_min_size(
+                                        pos2(caret_x, edit_rect.center().y - 8.0),
+                                        vec2(char_w, 16.0),
+                                    ),
+                                    1.5,
+                                    0.50,
+                                    1.5,
+                                )
+                            }
+                        }
+                        VimMode::Insert => (
+                            Rect::from_min_size(
+                                pos2(caret_x.max(edit_rect.left()), edit_rect.center().y - 8.0),
+                                vec2(1.8, 16.0),
+                            ),
+                            0.5,
+                            1.0,
+                            0.0,
+                        ),
+                        VimMode::Replace => (
+                            // Bottom underline bar for Replace mode (R) and Replace char (r)
+                            Rect::from_min_size(
+                                pos2(caret_x, edit_rect.center().y + 5.0),
+                                vec2(char_w, 3.0),
+                            ),
+                            0.5,
+                            1.0,
+                            1.0,
+                        ),
+                        VimMode::OperatorPending { operator, .. } => {
+                            use egui_vim_nav::VimOperator;
+                            match operator {
+                                VimOperator::Delete => (
+                                    // Bottom half-block for Delete ('d')
+                                    Rect::from_min_size(
+                                        pos2(caret_x, edit_rect.center().y),
+                                        vec2(char_w, 8.0),
+                                    ),
+                                    1.0,
+                                    0.35,
+                                    1.5,
+                                ),
+                                VimOperator::Change => (
+                                    // Top half-block for Change ('c')
+                                    Rect::from_min_size(
+                                        pos2(caret_x, edit_rect.center().y - 8.0),
+                                        vec2(char_w, 8.0),
+                                    ),
+                                    1.0,
+                                    0.35,
+                                    1.5,
+                                ),
+                                VimOperator::Yank => (
+                                    // Hollow outline frame for Yank ('y')
+                                    Rect::from_min_size(
+                                        pos2(caret_x, edit_rect.center().y - 8.0),
+                                        vec2(char_w, 16.0),
+                                    ),
+                                    1.5,
+                                    0.0,
+                                    2.0,
+                                ),
+                                _ => (
+                                    Rect::from_min_size(
+                                        pos2(caret_x, edit_rect.center().y),
+                                        vec2(char_w, 8.0),
+                                    ),
+                                    1.0,
+                                    0.35,
+                                    1.5,
+                                ),
+                            }
+                        }
+                        VimMode::Visual(_) => (
+                            Rect::from_min_size(
+                                pos2(caret_x, edit_rect.center().y - 8.0),
+                                vec2(char_w, 16.0),
+                            ),
+                            1.5,
+                            0.40,
+                            1.5,
+                        ),
+                    }
+                };
+
+                let target_mode_color = resolve_vim_mode_color(mode, self.palette, ui.visuals());
+                let cur_mode_col = state.current_mode_color.unwrap_or(target_mode_color);
+                let smoothed_mode_color = lerp_color(cur_mode_col, target_mode_color, (dt * 16.0).clamp(0.0, 1.0));
+                state.current_mode_color = Some(smoothed_mode_color);
+                if smoothed_mode_color != target_mode_color {
+                    ui.ctx().request_repaint();
+                }
+
+                // Macro-to-micro focus morphing:
+                // When focused transitions from false -> true: spawn from the full outer widget highlight rect!
+                let highlight_spawn_origin = rect.expand(3.0);
+                if self.focused && !state.cursor_spring.active {
+                    state.cursor_spring.spawn_from(highlight_spawn_origin, 6.0, target_caret_rect, target_rounding);
+                } else if !self.focused && state.cursor_spring.active {
+                    state.cursor_spring.exit_to(highlight_spawn_origin, 6.0);
+                }
+
+                // Advance fluid 4-corner cursor simulation
+                state.cursor_spring.update(target_caret_rect, self.focused, dt, ui.ctx());
+
+                if self.text.is_empty() {
+                    if let Some(ph) = self.placeholder {
+                        painter.text(
+                            pos2(edit_rect.left(), edit_rect.center().y),
+                            Align2::LEFT_CENTER,
+                            ph,
+                            font_id.clone(),
+                            placeholder_color,
+                        );
+                    }
+                } else {
+                    // Visual selection highlight
+                    if let Some(range) = vbuf.selection_range() {
+                        let min_char = self.text[..range.start.min(self.text.len())].chars().count();
+                        let max_char = self.text[..range.end.min(self.text.len())].chars().count();
+                        let cur1 = galley.from_ccursor(egui::text::CCursor::new(min_char));
+                        let cur2 = galley.from_ccursor(egui::text::CCursor::new(max_char));
+                        let r1 = galley.pos_from_cursor(&cur1);
+                        let r2 = galley.pos_from_cursor(&cur2);
+                        let sel_rect = Rect::from_min_max(
+                            pos2(text_pos.x + r1.left().min(r2.left()), edit_rect.top() + 2.0),
+                            pos2(text_pos.x + r1.left().max(r2.left()), edit_rect.bottom() - 2.0),
+                        );
+                        painter.rect_filled(sel_rect, Rounding::same(2.0), smoothed_mode_color.linear_multiply(0.25));
+                    }
+
+                    // Render Base Text: 100% stable, fully rendered, never clipped by cursor bounds
+                    painter.galley(text_pos, galley.clone(), text_color);
+                }
+
+                // Render animated cursor polygon with smooth mode color crossfading
+                let cursor_fill = smoothed_mode_color.linear_multiply(fill_mult);
+                let cursor_stroke = Stroke::new(stroke_width, smoothed_mode_color);
+                state.cursor_spring.paint(ui.painter(), cursor_fill, cursor_stroke);
+            }
+
+            resp
+        } else {
+            // Standard egui::TextEdit fallback for non-Vim text inputs
+            let mut edit = TextEdit::singleline(self.text)
+                .password(self.password)
+                .text_color(text_color)
+                .frame(false);
+
+            if let Some(ph) = self.placeholder {
+                edit = edit.hint_text(WidgetText::from(ph).color(placeholder_color));
+            }
+
+            let edit_response = ui.put(edit_rect, edit);
+
+            if self.editing && !edit_response.has_focus() {
+                edit_response.request_focus();
+            }
+
+            let has_focus = edit_response.has_focus();
+
+            if has_focus && ui.input(|i| {
+                i.key_pressed(egui::Key::Escape) || (i.modifiers.ctrl && (
+                    i.key_pressed(egui::Key::H) || i.key_pressed(egui::Key::J) || i.key_pressed(egui::Key::K) || i.key_pressed(egui::Key::L)
+                    || i.key_pressed(egui::Key::ArrowLeft) || i.key_pressed(egui::Key::ArrowDown) || i.key_pressed(egui::Key::ArrowUp) || i.key_pressed(egui::Key::ArrowRight)
+                ))
+            }) {
+                edit_response.surrender_focus();
+                ui.ctx().memory_mut(|m| m.stop_text_input());
+            }
+
+            edit_response
+        };
+
+        // 3. Quick clear button
+        if self.clear_button && !self.text.is_empty() {
+            let clear_rect = Rect::from_center_size(
+                pos2(rect.right() - 14.0, rect.center().y),
+                vec2(16.0, 16.0),
+            );
+            let clear_id = ui.make_persistent_id(self.placeholder.unwrap_or("txt_clear")).with("clear");
+            let clear_resp = ui.interact(clear_rect, clear_id, Sense::click());
+            let clear_color = if clear_resp.hovered() { text_color } else { placeholder_color };
+            ui.painter().text(
+                clear_rect.center(),
+                Align2::CENTER_CENTER,
+                "✖",
+                FontId::monospace(10.0),
+                clear_color,
+            );
+            if clear_resp.clicked() {
+                self.text.clear();
+            }
+        }
+
+        // Mode hint indicator on the right
+        if self.focused && self.mode_indicator {
+            let hint_pos = pos2(rect.right() - right_offset - 4.0, rect.center().y);
+            if let Some((mode, pending, badge_col)) = vim_mode_info {
+                let mode_label = mode.label();
+                let badge_text = if pending.is_empty() {
+                    format!("[{}]", mode_label)
+                } else {
+                    format!("[{} {}]", pending, mode_label)
+                };
+                ui.painter().text(
+                    hint_pos,
+                    Align2::RIGHT_CENTER,
+                    badge_text,
+                    FontId::monospace(9.5),
+                    badge_col,
+                );
+            } else if self.text.is_empty() {
+                let (badge_text, badge_col) = if self.editing || edit_response.has_focus() {
+                    ("[esc] done", focus_stroke.color.linear_multiply(0.7))
+                } else {
+                    ("[i] edit", placeholder_color.linear_multiply(0.8))
+                };
+                ui.painter().text(
+                    hint_pos,
+                    Align2::RIGHT_CENTER,
+                    badge_text,
+                    FontId::monospace(9.5),
+                    badge_col,
                 );
             }
         }
 
-        response
+        if let Some(st) = temp_state {
+            ui.data_mut(|d| d.insert_temp(id, st));
+        }
+
+        edit_response.union(response)
+    }
+}
+
+/// Resolves the theme color token associated with a given `VimMode`.
+pub fn resolve_vim_mode_color(
+    mode: VimMode,
+    palette: Option<&ThemePalette>,
+    visuals: &egui::Visuals,
+) -> Color32 {
+    use egui_vim_nav::VimOperator;
+    if let Some(p) = palette {
+        match mode {
+            VimMode::Normal => p.info,
+            VimMode::Insert => p.accent,
+            VimMode::Visual(_) => p.warning,
+            VimMode::Replace => p.danger,
+            VimMode::OperatorPending { operator, .. } => match operator {
+                VimOperator::Delete => p.danger,
+                VimOperator::Change => p.accent,
+                VimOperator::Yank => p.info,
+                _ => p.info_alt,
+            },
+        }
+    } else {
+        match mode {
+            VimMode::Normal => Color32::from_rgb(137, 180, 250),
+            VimMode::Insert => visuals.selection.stroke.color,
+            VimMode::Visual(_) => Color32::from_rgb(250, 179, 135),
+            VimMode::Replace => Color32::from_rgb(243, 139, 168),
+            VimMode::OperatorPending { operator, .. } => match operator {
+                VimOperator::Delete => Color32::from_rgb(243, 139, 168),
+                VimOperator::Change => visuals.selection.stroke.color,
+                VimOperator::Yank => Color32::from_rgb(137, 180, 250),
+                _ => Color32::from_rgb(203, 166, 247),
+            },
+        }
     }
 }
 
 /// Helper function to interpolate between two `Color32` values.
-fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
+pub fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
     let t = t.clamp(0.0, 1.0);
     Color32::from_rgba_premultiplied(
         (a.r() as f32 + (b.r() as f32 - a.r() as f32) * t) as u8,

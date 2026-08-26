@@ -151,3 +151,102 @@ fn test_highlight_group_independent_settings() {
 
     assert!(group.is_settled(), "All independent highlights must settle");
 }
+
+#[test]
+fn test_spring_cursor_morphing_and_lifecycle() {
+    use egui_spring::SpringCursor;
+    use spring_core::SpringParams;
+
+    let mut cursor = SpringCursor::new(SpringParams::snappy());
+    let outer_card = Rect::from_min_size(Pos2::new(50.0, 50.0), egui::vec2(300.0, 40.0));
+    let inner_caret = Rect::from_min_size(Pos2::new(120.0, 62.0), egui::vec2(10.0, 16.0));
+
+    // 1. Spawn from outer card (Macro -> Micro morphing)
+    cursor.spawn_from(outer_card, 6.0, inner_caret, 1.5);
+    assert!(cursor.active);
+    assert!(!cursor.is_settled());
+
+    let dt = 1.0 / 60.0;
+    let ctx = egui::Context::default();
+    let mut steps = 0;
+
+    while !cursor.is_settled() && steps < 600 {
+        cursor.update(inner_caret, true, dt, &ctx);
+        steps += 1;
+    }
+
+    assert!(cursor.is_settled(), "Cursor must settle to inner caret");
+    let bounds = cursor.bounding_rect();
+    assert!((bounds.min.x - inner_caret.min.x).abs() < 1e-2);
+    assert!((bounds.min.y - inner_caret.min.y).abs() < 1e-2);
+    assert!((bounds.max.x - inner_caret.max.x).abs() < 1e-2);
+    assert!((bounds.max.y - inner_caret.max.y).abs() < 1e-2);
+
+    // 2. Exit to outer card (Micro -> Macro exit)
+    cursor.exit_to(outer_card, 6.0);
+    assert!(!cursor.active);
+
+    steps = 0;
+    while !cursor.is_settled() && steps < 600 {
+        cursor.update(outer_card, false, dt, &ctx);
+        steps += 1;
+    }
+
+    assert!(cursor.is_settled(), "Cursor must settle upon exit");
+    assert!(cursor.alpha_spring.value() < 1e-3, "Alpha must fade to 0 on exit");
+}
+
+#[test]
+fn test_spring_cursor_snappy_morph_and_restore() {
+    use egui_spring::SpringCursor;
+    use spring_core::SpringParams;
+
+    // Normal typing physics is gentle
+    let gentle_params = SpringParams::gentle();
+    let mut cursor = SpringCursor::new(gentle_params);
+    assert_eq!(cursor.base_params, gentle_params);
+    assert!(!cursor.is_morphing);
+
+    let outer_box = Rect::from_min_size(Pos2::new(10.0, 10.0), egui::vec2(250.0, 36.0));
+    let target_caret = Rect::from_min_size(Pos2::new(40.0, 20.0), egui::vec2(2.0, 16.0));
+
+    // Spawn from outer box -> triggers Snappy morph physics!
+    cursor.spawn_from(outer_box, 6.0, target_caret, 0.5);
+    assert!(cursor.is_morphing);
+    let snappy = SpringParams::snappy();
+    assert_eq!(cursor.corners.base_stiffness, snappy.angular_frequency);
+    assert_eq!(cursor.corners.base_damping, snappy.damping_ratio);
+
+    let dt = 1.0 / 60.0;
+    let ctx = egui::Context::default();
+    let mut steps = 0;
+    while cursor.is_morphing && steps < 600 {
+        cursor.update(target_caret, true, dt, &ctx);
+        steps += 1;
+    }
+
+    // Once collapsed to caret, is_morphing becomes false and base physics restored
+    assert!(!cursor.is_morphing);
+    assert_eq!(cursor.corners.base_stiffness, gentle_params.angular_frequency);
+    assert_eq!(cursor.corners.base_damping, gentle_params.damping_ratio);
+}
+
+#[test]
+fn test_spring_cursor_gentle_exit_physics() {
+    use egui_spring::SpringCursor;
+    use spring_core::SpringParams;
+
+    let mut cursor = SpringCursor::new(SpringParams::snappy());
+    let outer_box = Rect::from_min_size(Pos2::new(10.0, 10.0), egui::vec2(250.0, 36.0));
+    let target_caret = Rect::from_min_size(Pos2::new(40.0, 20.0), egui::vec2(2.0, 16.0));
+
+    cursor.spawn_from(outer_box, 6.0, target_caret, 0.5);
+
+    // Call exit_to -> should engage Gentle physics for the outward expansion
+    cursor.exit_to(outer_box, 6.0);
+    assert!(!cursor.active);
+    let gentle = SpringParams::gentle();
+    assert_eq!(cursor.corners.base_stiffness, gentle.angular_frequency);
+    assert_eq!(cursor.corners.base_damping, gentle.damping_ratio);
+    assert_eq!(cursor.alpha_spring.params.angular_frequency, gentle.angular_frequency);
+}

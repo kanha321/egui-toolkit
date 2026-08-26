@@ -26,6 +26,12 @@ pub fn monokai_pro() -> ThemePalette {
         info: Color32::from_rgb(120, 220, 232), // Cyan
         info_alt: Color32::from_rgb(252, 152, 103), // Orange
         sys_controls: Color32::from_rgb(171, 157, 242),
+        on_accent: Color32::from_rgb(34, 31, 34),
+        on_surface: Color32::from_rgb(252, 252, 250),
+        on_success: Color32::from_rgb(34, 31, 34),
+        on_warning: Color32::from_rgb(34, 31, 34),
+        on_danger: Color32::from_rgb(34, 31, 34),
+        on_info: Color32::from_rgb(34, 31, 34),
         swatches: vec![
             Color32::from_rgb(255, 97, 136),
             Color32::from_rgb(252, 152, 103),

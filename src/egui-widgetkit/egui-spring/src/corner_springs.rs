@@ -147,7 +147,12 @@ impl CornerSprings {
         let travel_vec = target_center - current_center;
         let travel_dist = travel_vec.length();
 
-        let travel_dir = if travel_dist > 15.0 {
+        // When resizing / morphing between different sizes (e.g. caret <-> card), expand/shrink symmetrically without directional bias
+        let current_size = (self.corners[2].pos() - self.corners[0].pos()).abs();
+        let target_size = target.size();
+        let is_resizing = (current_size.x - target_size.x).abs() > 4.0 || (current_size.y - target_size.y).abs() > 4.0;
+
+        let travel_dir = if travel_dist > 10.0 && !is_resizing {
             travel_vec / travel_dist
         } else {
             Vec2::ZERO

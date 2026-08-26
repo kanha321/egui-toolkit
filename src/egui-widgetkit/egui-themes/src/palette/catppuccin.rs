@@ -26,6 +26,12 @@ pub fn mocha() -> ThemePalette {
         info: Color32::from_rgb(137, 180, 250), // Blue
         info_alt: Color32::from_rgb(148, 226, 213), // Teal
         sys_controls: Color32::from_rgb(116, 199, 236), // Sapphire
+        on_accent: Color32::from_rgb(17, 17, 27),
+        on_surface: Color32::from_rgb(205, 214, 244),
+        on_success: Color32::from_rgb(17, 17, 27),
+        on_warning: Color32::from_rgb(17, 17, 27),
+        on_danger: Color32::from_rgb(17, 17, 27),
+        on_info: Color32::from_rgb(17, 17, 27),
         swatches: vec![
             Color32::from_rgb(243, 139, 168),
             Color32::from_rgb(250, 179, 135),
@@ -63,6 +69,12 @@ pub fn macchiato() -> ThemePalette {
         info: Color32::from_rgb(138, 173, 244), // Blue
         info_alt: Color32::from_rgb(139, 213, 202), // Teal
         sys_controls: Color32::from_rgb(238, 212, 159), // Yellow
+        on_accent: Color32::from_rgb(24, 25, 38),
+        on_surface: Color32::from_rgb(202, 211, 245),
+        on_success: Color32::from_rgb(24, 25, 38),
+        on_warning: Color32::from_rgb(24, 25, 38),
+        on_danger: Color32::from_rgb(24, 25, 38),
+        on_info: Color32::from_rgb(24, 25, 38),
         swatches: vec![
             Color32::from_rgb(237, 135, 150),
             Color32::from_rgb(245, 169, 127),
@@ -98,6 +110,12 @@ pub fn frappe() -> ThemePalette {
         info: Color32::from_rgb(140, 170, 238), // Blue
         info_alt: Color32::from_rgb(129, 200, 190), // Teal
         sys_controls: Color32::from_rgb(186, 187, 241), // Lavender
+        on_accent: Color32::from_rgb(35, 38, 52),
+        on_surface: Color32::from_rgb(198, 208, 245),
+        on_success: Color32::from_rgb(35, 38, 52),
+        on_warning: Color32::from_rgb(35, 38, 52),
+        on_danger: Color32::from_rgb(35, 38, 52),
+        on_info: Color32::from_rgb(35, 38, 52),
         swatches: vec![
             Color32::from_rgb(231, 130, 132),
             Color32::from_rgb(239, 159, 118),
@@ -135,6 +153,12 @@ pub fn latte() -> ThemePalette {
         info: Color32::from_rgb(30, 102, 245), // Blue
         info_alt: Color32::from_rgb(23, 146, 153), // Teal
         sys_controls: Color32::from_rgb(114, 135, 253), // Lavender
+        on_accent: Color32::from_rgb(255, 255, 255),
+        on_surface: Color32::from_rgb(76, 79, 105),
+        on_success: Color32::from_rgb(255, 255, 255),
+        on_warning: Color32::from_rgb(255, 255, 255),
+        on_danger: Color32::from_rgb(255, 255, 255),
+        on_info: Color32::from_rgb(255, 255, 255),
         swatches: vec![
             Color32::from_rgb(210, 15, 57),
             Color32::from_rgb(254, 100, 27),

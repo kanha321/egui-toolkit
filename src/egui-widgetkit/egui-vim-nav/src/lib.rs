@@ -22,8 +22,14 @@ pub mod focus_graph;
 pub mod key_handler;
 pub mod navigator;
 pub mod register;
+pub mod vim_buffer;
 
 pub use focus_graph::{BranchGroup, BranchStrategy, Direction, FocusGraph, Neighbors};
 pub use key_handler::{VimAction, VimKeyHandler};
 pub use navigator::{FocusEvent, FocusWrap, Navigator};
 pub use register::{FocusRegion, FocusRegionResponse};
+pub use vim_buffer::{
+    calculate_motion, clamp_cursor, HistoryEntry, ParsedCommand, TextObject, TextObjectScope,
+    TextObjectTarget, UndoHistory, VimBufferState, VimMode, VimMotion, VimOperator, VimParser,
+    VimRegisters, VisualType,
+};

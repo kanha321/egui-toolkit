@@ -35,12 +35,37 @@ fn test_token_resolution_and_mutation() {
     assert_eq!(palette.get(ThemeToken::Base), palette.base);
     assert_eq!(palette.get(ThemeToken::Text), palette.text);
     assert_eq!(palette.get(ThemeToken::Accent), palette.accent);
+    assert_eq!(palette.get(ThemeToken::OnAccent), palette.on_accent);
+    assert_eq!(palette.get(ThemeToken::OnSurface), palette.on_surface);
+    assert_eq!(palette.get(ThemeToken::OnSuccess), palette.on_success);
+    assert_eq!(palette.get(ThemeToken::OnWarning), palette.on_warning);
+    assert_eq!(palette.get(ThemeToken::OnDanger), palette.on_danger);
+    assert_eq!(palette.get(ThemeToken::OnInfo), palette.on_info);
 
     // Check mutating via token
     let test_color = Color32::from_rgb(123, 45, 67);
     palette.set(ThemeToken::Accent, test_color);
     assert_eq!(palette.accent, test_color);
     assert_eq!(palette.get(ThemeToken::Accent), test_color);
+
+    palette.set(ThemeToken::OnAccent, Color32::WHITE);
+    assert_eq!(palette.on_accent, Color32::WHITE);
+    assert_eq!(palette.get(ThemeToken::OnAccent), Color32::WHITE);
+}
+
+#[test]
+fn test_contrast_and_luminance_calculation() {
+    let palette = ThemePalette::catppuccin_mocha();
+
+    // Pure black has 0.0 luminance, pure white has 1.0 luminance
+    assert_eq!(ThemePalette::relative_luminance(Color32::BLACK), 0.0);
+    assert!((ThemePalette::relative_luminance(Color32::WHITE) - 1.0).abs() < 1e-4);
+
+    // Dark background yields light text
+    assert_eq!(palette.contrast_on(Color32::from_rgb(10, 10, 10)), palette.text);
+
+    // Bright background yields dark text (crust)
+    assert_eq!(palette.contrast_on(Color32::from_rgb(240, 240, 240)), palette.crust);
 }
 
 #[test]

@@ -26,6 +26,12 @@ pub fn tokyo_night() -> ThemePalette {
         info: Color32::from_rgb(122, 162, 247), // Blue
         info_alt: Color32::from_rgb(115, 218, 202), // Teal
         sys_controls: Color32::from_rgb(42, 195, 222), // Cyan
+        on_accent: Color32::from_rgb(22, 22, 30),
+        on_surface: Color32::from_rgb(192, 202, 245),
+        on_success: Color32::from_rgb(22, 22, 30),
+        on_warning: Color32::from_rgb(22, 22, 30),
+        on_danger: Color32::from_rgb(22, 22, 30),
+        on_info: Color32::from_rgb(22, 22, 30),
         swatches: vec![
             Color32::from_rgb(247, 118, 142),
             Color32::from_rgb(255, 158, 100),

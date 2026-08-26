@@ -75,6 +75,7 @@ pub struct Card<'a> {
     padding: Vec2,
     min_size: Vec2,
     interactive: bool,
+    focused: bool,
     hover_lift: f32,
     spring_params: SpringParams,
     motion: bool,
@@ -106,6 +107,7 @@ impl<'a> Card<'a> {
             min_size: Vec2::ZERO,
             hover_lift: 4.0,
             interactive: false,
+            focused: false,
             spring_params: SpringParams::new(22.0, 0.48),
             motion: true,
             palette: None,
@@ -186,9 +188,21 @@ impl<'a> Card<'a> {
         self
     }
 
+    /// Sets keyboard focus / active state for this card container.
+    pub fn focused(mut self, focused: bool) -> Self {
+        self.focused = focused;
+        self
+    }
+
     /// Sets the vertical pixel distance for hover lift (default `3.0pt`).
     pub fn hover_lift(mut self, lift: f32) -> Self {
         self.hover_lift = lift;
+        self
+    }
+
+    /// Configures physical spring dynamics parameters for hover/focus elevation.
+    pub fn spring_params(mut self, params: SpringParams) -> Self {
+        self.spring_params = params;
         self
     }
 
@@ -231,11 +245,11 @@ impl<'a> Card<'a> {
             )
         });
 
-        let (bg_fill, bg_stroke, hover_stroke, title_col, subtitle_col) =
+        let (bg_fill, bg_stroke, _hover_stroke, title_col, subtitle_col) =
             if let Some(p) = self.palette {
                 (
-                    self.fill.unwrap_or(p.surface0),
-                    self.stroke.unwrap_or(Stroke::new(1.0, p.surface1)),
+                    self.fill.unwrap_or(p.mantle),
+                    self.stroke.unwrap_or(Stroke::new(1.0, p.surface0)),
                     self.hover_stroke.unwrap_or(Stroke::new(1.5, p.accent)),
                     self.title_color.unwrap_or(p.text),
                     self.subtitle_color.unwrap_or(p.subtext0),
@@ -251,7 +265,7 @@ impl<'a> Card<'a> {
                 )
             };
 
-        let rounding = self.rounding.unwrap_or(Rounding::same(8.0));
+        let rounding = self.rounding.unwrap_or(Rounding::same(10.0));
         let padding = self.padding;
 
         let id = self.id_source.unwrap_or_else(|| {
@@ -262,9 +276,9 @@ impl<'a> Card<'a> {
             }
         });
 
-        // Read previous frame's hover animation value for this frame's rendering
+        // Read previous frame's hover/focus animation value for this frame's rendering
         let dt = ui.input(|i| i.stable_dt).min(0.05);
-        let prev_hover_val: f32 = if self.interactive && self.motion {
+        let prev_hover_val: f32 = if self.motion {
             ui.data_mut(|d| {
                 d.get_temp::<f32>(id.with("hover_val")).unwrap_or(0.0)
             })
@@ -272,37 +286,32 @@ impl<'a> Card<'a> {
             0.0
         };
 
-        let current_stroke = if prev_hover_val > 0.01 && self.interactive {
-            let w = bg_stroke.width + (hover_stroke.width - bg_stroke.width) * prev_hover_val;
-            let t = prev_hover_val.clamp(0.0, 1.0);
-            let lerp_u8 = |a: u8, b: u8| -> u8 { (a as f32 + (b as f32 - a as f32) * t) as u8 };
-            let (a, b) = (bg_stroke.color, hover_stroke.color);
-            let c = Color32::from_rgba_premultiplied(
-                lerp_u8(a.r(), b.r()), lerp_u8(a.g(), b.g()),
-                lerp_u8(a.b(), b.b()), lerp_u8(a.a(), b.a()),
-            );
-            Stroke::new(w, c)
-        } else {
-            bg_stroke
-        };
-
-        let current_fill = if prev_hover_val > 0.01 && self.interactive {
-            self.hover_fill.unwrap_or_else(|| bg_fill.linear_multiply(1.0 + 0.08 * prev_hover_val))
+        let current_stroke = bg_stroke;
+        let t = prev_hover_val.clamp(0.0, 1.0);
+        let current_fill = if self.motion && t > 0.001 {
+            bg_fill.linear_multiply(1.0 + 0.08 * t)
         } else {
             bg_fill
         };
 
-        let lift = if self.interactive && self.motion {
-            (prev_hover_val * self.hover_lift).max(0.0)
+        // Spring-animated soft ambient drop shadow (clean bidirectional fade in & out)
+        let shadow = if self.motion && t > 0.001 {
+            egui::epaint::Shadow {
+                offset: vec2(0.0, 2.0 + 4.0 * t),
+                blur: 8.0 + 14.0 * t,
+                spread: 1.5 + 3.0 * t,
+                color: Color32::from_black_alpha((55.0 * t) as u8),
+            }
         } else {
-            0.0
+            egui::epaint::Shadow::NONE
         };
 
         let prepared_frame = egui::Frame::none()
             .fill(current_fill)
             .stroke(current_stroke)
             .rounding(rounding)
-            .inner_margin(padding + vec2(0.0, lift * 0.5));
+            .shadow(shadow)
+            .inner_margin(padding);
 
         let mut inner_ret: Option<R> = None;
         let frame_response = prepared_frame.show(ui, |ui| {
@@ -328,15 +337,15 @@ impl<'a> Card<'a> {
         let card_rect = response.rect;
 
         // Now detect hover on the ACTUAL card rect
-        let is_hovered = ui.input(|i| {
+        let is_active = self.focused || (self.interactive && ui.input(|i| {
             i.pointer.hover_pos()
                 .is_some_and(|pos| card_rect.contains(pos))
-        });
+        }));
 
-        // Update animation state using actual hover
-        if self.interactive && self.motion {
+        // Update animation state using active hover / focus state (animates both IN and OUT)
+        if self.motion {
             if let Some(state) = self.external_state {
-                state.update(dt, is_hovered, ui.ctx());
+                state.update(dt, is_active, ui.ctx());
                 let val = state.hover_spring.value();
                 ui.data_mut(|d| d.insert_temp(id.with("hover_val"), val));
             } else {
@@ -345,7 +354,8 @@ impl<'a> Card<'a> {
                         hover_spring: Spring::new(0.0, self.spring_params),
                     })
                 });
-                state.update(dt, is_hovered, ui.ctx());
+                state.hover_spring.params = self.spring_params;
+                state.update(dt, is_active, ui.ctx());
                 let val = state.hover_spring.value();
                 ui.data_mut(|d| {
                     d.insert_temp(id, state);

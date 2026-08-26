@@ -42,12 +42,12 @@ pub mod slider;
 pub mod switch;
 pub mod tabs;
 
-pub use badge::{Badge, BadgeVariant};
+pub use badge::{Badge, BadgeStyle, BadgeVariant};
 pub use button::{Button, ButtonSize, ButtonState, ButtonVariant};
 pub use card::{Card, CardState};
 pub use checkbox::{Checkbox, CheckboxState, RadioButton};
-pub use input::{InputState, TextInput};
+pub use input::{lerp_color, resolve_vim_mode_color, InputState, TextInput};
 pub use progress::{ProgressBar, ProgressState, ProgressVariant};
-pub use slider::{Slider, SliderState};
+pub use slider::{Slider, SliderLayout, SliderState};
 pub use switch::{Switch, SwitchSize, SwitchState};
 pub use tabs::{SegmentedTabs, TabItem, TabsState};

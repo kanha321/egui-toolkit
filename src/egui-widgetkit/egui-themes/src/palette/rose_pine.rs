@@ -26,6 +26,12 @@ pub fn rose_pine() -> ThemePalette {
         info: Color32::from_rgb(156, 207, 216), // Foam
         info_alt: Color32::from_rgb(235, 188, 186), // Rose
         sys_controls: Color32::from_rgb(196, 167, 231), // Iris
+        on_accent: Color32::from_rgb(18, 16, 26),
+        on_surface: Color32::from_rgb(224, 222, 244),
+        on_success: Color32::from_rgb(224, 222, 244),
+        on_warning: Color32::from_rgb(18, 16, 26),
+        on_danger: Color32::from_rgb(18, 16, 26),
+        on_info: Color32::from_rgb(18, 16, 26),
         swatches: vec![
             Color32::from_rgb(235, 111, 146),
             Color32::from_rgb(246, 193, 119),

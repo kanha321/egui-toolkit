@@ -438,14 +438,14 @@ impl<'a> Button<'a> {
                         self.hover_fill.unwrap_or(p.accent.linear_multiply(1.15)),
                         self.active_fill.unwrap_or(p.accent.linear_multiply(0.85)),
                         self.stroke.unwrap_or(Stroke::NONE),
-                        self.text_color.unwrap_or(if p.dark { p.crust } else { Color32::WHITE }),
+                        self.text_color.unwrap_or(p.on_accent),
                     ),
                     ButtonVariant::Secondary => (
                         self.fill.unwrap_or(p.surface0),
                         self.hover_fill.unwrap_or(p.surface1),
                         self.active_fill.unwrap_or(p.surface2),
                         self.stroke.unwrap_or(Stroke::new(1.0, p.surface1)),
-                        self.text_color.unwrap_or(p.text),
+                        self.text_color.unwrap_or(p.on_surface),
                     ),
                     ButtonVariant::Ghost => (
                         self.fill.unwrap_or(Color32::TRANSPARENT),
@@ -459,7 +459,7 @@ impl<'a> Button<'a> {
                         self.hover_fill.unwrap_or(p.danger.linear_multiply(1.15)),
                         self.active_fill.unwrap_or(p.danger.linear_multiply(0.85)),
                         self.stroke.unwrap_or(Stroke::NONE),
-                        self.text_color.unwrap_or(Color32::WHITE),
+                        self.text_color.unwrap_or(p.on_danger),
                     ),
                     ButtonVariant::Outline => (
                         self.fill.unwrap_or(Color32::TRANSPARENT),
@@ -473,14 +473,14 @@ impl<'a> Button<'a> {
                         self.hover_fill.unwrap_or(p.success.linear_multiply(1.15)),
                         self.active_fill.unwrap_or(p.success.linear_multiply(0.85)),
                         self.stroke.unwrap_or(Stroke::NONE),
-                        self.text_color.unwrap_or(Color32::WHITE),
+                        self.text_color.unwrap_or(p.on_success),
                     ),
                     ButtonVariant::Warning => (
                         self.fill.unwrap_or(p.warning),
                         self.hover_fill.unwrap_or(p.warning.linear_multiply(1.15)),
                         self.active_fill.unwrap_or(p.warning.linear_multiply(0.85)),
                         self.stroke.unwrap_or(Stroke::NONE),
-                        self.text_color.unwrap_or(if p.dark { p.crust } else { Color32::WHITE }),
+                        self.text_color.unwrap_or(p.on_warning),
                     ),
                 }
             } else {

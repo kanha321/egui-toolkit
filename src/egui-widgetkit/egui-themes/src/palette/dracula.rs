@@ -26,6 +26,12 @@ pub fn dracula() -> ThemePalette {
         info: Color32::from_rgb(139, 233, 253), // Cyan
         info_alt: Color32::from_rgb(255, 121, 198), // Pink
         sys_controls: Color32::from_rgb(189, 147, 249),
+        on_accent: Color32::from_rgb(40, 42, 54),
+        on_surface: Color32::from_rgb(248, 248, 242),
+        on_success: Color32::from_rgb(40, 42, 54),
+        on_warning: Color32::from_rgb(40, 42, 54),
+        on_danger: Color32::from_rgb(40, 42, 54),
+        on_info: Color32::from_rgb(40, 42, 54),
         swatches: vec![
             Color32::from_rgb(255, 85, 85),
             Color32::from_rgb(255, 184, 108),

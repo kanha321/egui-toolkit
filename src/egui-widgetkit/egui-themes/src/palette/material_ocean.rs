@@ -26,6 +26,12 @@ pub fn material_ocean() -> ThemePalette {
         info: Color32::from_rgb(130, 170, 255), // Blue
         info_alt: Color32::from_rgb(247, 140, 108), // Orange
         sys_controls: Color32::from_rgb(199, 146, 234), // Purple
+        on_accent: Color32::from_rgb(15, 17, 26),
+        on_surface: Color32::from_rgb(166, 172, 205),
+        on_success: Color32::from_rgb(15, 17, 26),
+        on_warning: Color32::from_rgb(15, 17, 26),
+        on_danger: Color32::from_rgb(15, 17, 26),
+        on_info: Color32::from_rgb(15, 17, 26),
         swatches: vec![
             Color32::from_rgb(240, 113, 120),
             Color32::from_rgb(247, 140, 108),

@@ -3,10 +3,10 @@
 use egui::{Rect, Rounding, Stroke, Ui, Vec2};
 use egui_spring::{HighlightConfig, HighlightGroup, MotionPhysics};
 use egui_themes::ThemePalette;
-use egui_vim_nav::{Direction, FocusGraph, Navigator, VimAction, VimKeyHandler};
+use egui_vim_nav::{Direction, FocusGraph, Navigator, VimAction, VimBufferState, VimKeyHandler, VimMode};
 use egui_widgets::{
-    Badge, Button, Card, Checkbox, ProgressBar, ProgressVariant, RadioButton,
-    SegmentedTabs, Slider, Switch, TextInput,
+    Badge, Button, Card, Checkbox, InputState, ProgressBar, ProgressVariant, RadioButton,
+    SegmentedTabs, Slider, SliderState, Switch, TextInput,
 };
 use spring_core::SpringParams;
 
@@ -82,6 +82,12 @@ pub struct WidgetsDemoState {
     pub radio_tier: usize,
     pub search_term: String,
     pub token_input: String,
+    pub search_vim: VimBufferState,
+    pub token_vim: VimBufferState,
+    pub search_input_state: InputState,
+    pub token_input_state: InputState,
+    pub bandwidth_slider_state: SliderState,
+    pub thermal_slider_state: SliderState,
     // Intuitive physics parameters
     pub response_time: f32,    // seconds — how long the animation takes
     pub bounce: f32,           // 0.0–1.0 — overshoot amount (0 = none)
@@ -97,6 +103,8 @@ pub struct WidgetsDemoState {
     pub dash_highlights: HighlightGroup<DashHighlight>,
     pub dash_key_handler: VimKeyHandler,
     pub last_section_widget: [DashboardWidget; 5],
+    /// Whether user is actively focused inside a text input (controlling the text cursor with HJKL / Vim)
+    pub text_focused: bool,
 }
 
 impl Default for WidgetsDemoState {
@@ -151,8 +159,8 @@ impl Default for WidgetsDemoState {
             DashHighlight::Section,
             HighlightConfig::new()
                 .with_motion(MotionPhysics::Gentle)
-                .with_fill(egui::Color32::from_rgba_unmultiplied(130, 180, 255, 10))
-                .with_stroke(Stroke::new(2.0, egui::Color32::from_rgba_unmultiplied(130, 180, 255, 100)))
+                .with_fill(egui::Color32::TRANSPARENT)
+                .with_stroke(Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(130, 180, 255, 90)))
                 .with_rounding(8.0)
                 .with_padding(4.0),
         );
@@ -160,9 +168,9 @@ impl Default for WidgetsDemoState {
         highlights.add(
             DashHighlight::Item,
             HighlightConfig::new()
-                .with_motion(MotionPhysics::Custom(SpringParams::new(28.1, 0.64)))
-                .with_fill(egui::Color32::from_rgba_unmultiplied(130, 130, 255, 30))
-                .with_stroke(Stroke::new(2.0, egui::Color32::from_rgba_unmultiplied(130, 130, 255, 180)))
+                .with_motion(MotionPhysics::Custom(SpringParams::new(28.1, 0.57)))
+                .with_fill(egui::Color32::TRANSPARENT)
+                .with_stroke(Stroke::new(1.5, egui::Color32::from_rgba_unmultiplied(130, 130, 255, 240)))
                 .with_rounding(6.0)
                 .with_padding(3.0),
         );
@@ -180,10 +188,16 @@ impl Default for WidgetsDemoState {
             radio_tier: 2,
             search_term: String::new(),
             token_input: String::new(),
+            search_vim: VimBufferState::new(""),
+            token_vim: VimBufferState::new(""),
+            search_input_state: InputState::default(),
+            token_input_state: InputState::default(),
+            bandwidth_slider_state: SliderState::default(),
+            thermal_slider_state: SliderState::default(),
             response_time: 0.10,
-            bounce: 0.40,
+            bounce: 0.47,
             mass: 5.0,
-            velocity_kick: 5.0,
+            velocity_kick: 6.5,
             test_slider_val: 45.0,
             dash_graph: g,
             dash_nav: Navigator::new().with_initial_focus(SwitchTurbo),
@@ -198,6 +212,7 @@ impl Default for WidgetsDemoState {
                 TokenInput,
                 BtnDeploy,
             ],
+            text_focused: false,
         }
     }
 }
@@ -444,15 +459,25 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
 
                 Card::new()
                     .title("Semantic Status Badges & Tags")
-                    .subtitle("Status indicators with optional pulsing dots")
+                    .subtitle("High-contrast technical outline pills and punchy solid labels")
                     .palette(palette)
                     .show(ui, |ui| {
+                        ui.label(egui::RichText::new("Technical Outline Style (Option A — Default):").small().color(palette.subtext0));
                         ui.horizontal_wrapped(|ui| {
-                            Badge::new("System Active").success().dot(true).palette(palette).show(ui);
-                            Badge::new("High CPU Load").warning().dot(true).palette(palette).show(ui);
-                            Badge::new("Connection Error").danger().dot(true).palette(palette).show(ui);
-                            Badge::new("Syncing...").info().dot(true).palette(palette).show(ui);
-                            Badge::new("v2.4.0-stable").neutral().palette(palette).show(ui);
+                            Badge::new("System Active").success().outline().dot(true).palette(palette).show(ui);
+                            Badge::new("High CPU Load").warning().outline().dot(true).palette(palette).show(ui);
+                            Badge::new("Connection Error").danger().outline().dot(true).palette(palette).show(ui);
+                            Badge::new("Syncing...").info().outline().dot(true).palette(palette).show(ui);
+                            Badge::new("v2.4.0-stable").neutral().outline().palette(palette).show(ui);
+                        });
+                        ui.add_space(8.0);
+                        ui.label(egui::RichText::new("Punchy Solid Style (Option B):").small().color(palette.subtext0));
+                        ui.horizontal_wrapped(|ui| {
+                            Badge::new("System Active").success().solid().dot(true).palette(palette).show(ui);
+                            Badge::new("High CPU Load").warning().solid().dot(true).palette(palette).show(ui);
+                            Badge::new("Connection Error").danger().solid().dot(true).palette(palette).show(ui);
+                            Badge::new("Syncing...").info().solid().dot(true).palette(palette).show(ui);
+                            Badge::new("v2.4.0-stable").neutral().solid().palette(palette).show(ui);
                         });
                     });
             }
@@ -545,8 +570,9 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                         ui.add_space(8.0);
 
                         Slider::new(&mut state.threshold_slider, 0.0..=100.0)
-                            .label("Detection Sensitivity")
+                            .label("Detection Sensitivity (Stacked Layout)")
                             .suffix(" dB")
+                            .stacked()
                             .palette(palette)
                             .spring_params(custom_spring_params)
                             .click_momentum(velocity_kick)
@@ -676,11 +702,73 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                 }
 
                 let current_focused = state.dash_nav.focused().copied().unwrap_or(SwitchTurbo);
+                let is_on_text_widget = matches!(current_focused, SearchInput | TokenInput | SliderBandwidth | SliderThermal);
 
-                // If currently focused on a non-text widget, force stop egui text input
-                // so HJKL navigation and action keys are NEVER blocked by lingering text focus!
-                if !matches!(current_focused, SearchInput | TokenInput) {
+                // If currently focused on a non-text widget, force reset text focus
+                if !is_on_text_widget {
+                    state.text_focused = false;
                     ctx.memory_mut(|m| m.stop_text_input());
+                } else if !state.text_focused {
+                    // Check if slider editing was triggered by clicking the badge
+                    if (current_focused == SliderBandwidth && state.bandwidth_slider_state.editing)
+                        || (current_focused == SliderThermal && state.thermal_slider_state.editing)
+                    {
+                        state.text_focused = true;
+                    } else {
+                        // When sitting on a text or slider widget (in UI nav mode):
+                        // Pressing 'i', 'a', Enter, Space, or 'f' enters text editing!
+                        let enter_text = ctx.input(|i| {
+                            !i.modifiers.ctrl && !i.modifiers.alt && (
+                                i.key_pressed(egui::Key::I) || i.key_pressed(egui::Key::A)
+                                || i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::Space) || i.key_pressed(egui::Key::F)
+                            )
+                        });
+                        if enter_text {
+                            state.text_focused = true;
+                            match current_focused {
+                                SearchInput => {
+                                    state.search_vim.mode = VimMode::Insert;
+                                    state.search_vim.cursor = state.search_term.len();
+                                }
+                                TokenInput => {
+                                    state.token_vim.mode = VimMode::Insert;
+                                    state.token_vim.cursor = state.token_input.len();
+                                }
+                                SliderBandwidth | SliderThermal => {}
+                                _ => {}
+                            }
+                        }
+                    }
+                } else {
+                    // Check if slider editing finished internally (e.g. user pressed Enter or clicked outside)
+                    let slider_finished = (current_focused == SliderBandwidth && !state.bandwidth_slider_state.editing)
+                        || (current_focused == SliderThermal && !state.thermal_slider_state.editing);
+
+                    // 2-Tier Modal Exit:
+                    // When in Insert/Visual/Replace/Operator mode, VimBuffer handles Escape by switching to Normal mode.
+                    // When already in clean Normal mode, Escape cleanly exits text editing back to Level 1 UI Navigation.
+                    let is_in_normal_mode = match current_focused {
+                        SearchInput => state.search_vim.mode() == VimMode::Normal && state.search_vim.parser.pending_keys_label().is_empty(),
+                        TokenInput => state.token_vim.mode() == VimMode::Normal && state.token_vim.parser.pending_keys_label().is_empty(),
+                        SliderBandwidth => !state.bandwidth_slider_state.editing || (state.bandwidth_slider_state.vim_buffer.mode() == VimMode::Normal && state.bandwidth_slider_state.vim_buffer.parser.pending_keys_label().is_empty()),
+                        SliderThermal => !state.thermal_slider_state.editing || (state.thermal_slider_state.vim_buffer.mode() == VimMode::Normal && state.thermal_slider_state.vim_buffer.parser.pending_keys_label().is_empty()),
+                        _ => true,
+                    };
+                    let esc_pressed = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+                    let should_exit = slider_finished
+                        || (esc_pressed && is_in_normal_mode)
+                        || state.dash_key_handler.handle_section_input(&ctx).is_some();
+
+                    if should_exit {
+                        state.text_focused = false;
+                        state.search_vim.mode = VimMode::Normal;
+                        state.token_vim.mode = VimMode::Normal;
+                        state.bandwidth_slider_state.vim_buffer.mode = VimMode::Normal;
+                        state.bandwidth_slider_state.editing = false;
+                        state.thermal_slider_state.vim_buffer.mode = VimMode::Normal;
+                        state.thermal_slider_state.editing = false;
+                        ctx.memory_mut(|m| m.stop_text_input());
+                    }
                 }
 
                 // Suppress egui's default Tab focus cycling (unconditionally)
@@ -695,45 +783,49 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                     &mut state.dash_section_nav,
                     &state.dash_section_graph,
                 ) {
+                    state.text_focused = false;
                     ctx.memory_mut(|m| m.stop_text_input());
                     let entry = state.last_section_widget[sec_event.current as usize];
                     state.dash_nav.set_focus_with_graph(Some(entry), &state.dash_graph);
                 }
 
                 // 2. 2-Pass Hierarchical Navigation (HJKL / Arrows without Ctrl)
-                if let Some(dir) = state.dash_key_handler.get_nav_direction(&ctx) {
-                    ctx.memory_mut(|m| m.stop_text_input());
-                    let current_widget = state.dash_nav.focused().copied().unwrap_or(SwitchTurbo);
-                    let current_section = widget_to_section(current_widget);
+                // When actively focused inside a text input, skip UI navigation so HJKL keys operate INSIDE the text buffer!
+                if !state.text_focused {
+                    if let Some(dir) = state.dash_key_handler.get_nav_direction(&ctx) {
+                        ctx.memory_mut(|m| m.stop_text_input());
+                        let current_widget = state.dash_nav.focused().copied().unwrap_or(SwitchTurbo);
+                        let current_section = widget_to_section(current_widget);
 
-                    // Pass 1: Try intra-section movement
-                    let mut moved_in_section = false;
-                    if let Some(event) = state.dash_nav.move_focus(&state.dash_graph, dir) {
-                        if widget_to_section(event.current) == current_section {
-                            moved_in_section = true;
-                            state.last_section_widget[current_section as usize] = event.current;
-                        } else {
-                            // Roll back if graph edge crossed section
-                            state.dash_nav.set_focus_with_graph(Some(current_widget), &state.dash_graph);
+                        // Pass 1: Try intra-section movement
+                        let mut moved_in_section = false;
+                        if let Some(event) = state.dash_nav.move_focus(&state.dash_graph, dir) {
+                            if widget_to_section(event.current) == current_section {
+                                moved_in_section = true;
+                                state.last_section_widget[current_section as usize] = event.current;
+                            } else {
+                                // Roll back if graph edge crossed section
+                                state.dash_nav.set_focus_with_graph(Some(current_widget), &state.dash_graph);
+                            }
                         }
-                    }
 
-                    // Pass 2: Boundary fallback — cross to adjacent section in section_graph
-                    if !moved_in_section {
-                        if let Some(sec_event) = state.dash_section_nav.move_focus(&state.dash_section_graph, dir) {
-                            let entry = section_entry_widget(
-                                sec_event.current,
-                                dir,
-                                state.last_section_widget[sec_event.current as usize],
-                            );
-                            state.dash_nav.set_focus_with_graph(Some(entry), &state.dash_graph);
-                            state.last_section_widget[sec_event.current as usize] = entry;
+                        // Pass 2: Boundary fallback — cross to adjacent section in section_graph
+                        if !moved_in_section {
+                            if let Some(sec_event) = state.dash_section_nav.move_focus(&state.dash_section_graph, dir) {
+                                let entry = section_entry_widget(
+                                    sec_event.current,
+                                    dir,
+                                    state.last_section_widget[sec_event.current as usize],
+                                );
+                                state.dash_nav.set_focus_with_graph(Some(entry), &state.dash_graph);
+                                state.last_section_widget[sec_event.current as usize] = entry;
+                            }
                         }
                     }
                 }
 
                 // Shift+H / Shift+L — adjust slider values when focused on a slider
-                {
+                if !state.text_focused {
                     let focused = state.dash_nav.focused().copied();
                     let shift_dir = ctx.input(|i| {
                         if !i.modifiers.shift { return None; }
@@ -761,8 +853,12 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                     }
                 }
 
-                // Action keys (F/Enter, D, Q/Esc)
-                let action = state.dash_key_handler.handle_action(&ctx);
+                // Action keys (F/Enter, D, Q/Esc) — suppressed when actively focused in text input
+                let action = if state.text_focused {
+                    None
+                } else {
+                    state.dash_key_handler.handle_action(&ctx)
+                };
                 let focused = state.dash_nav.focused().copied();
 
                 if let Some(VimAction::Back) = action {
@@ -798,33 +894,49 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                     ui.heading("🚀 Unified Control Center");
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         Badge::new("System Nominal").success().dot(true).palette(palette).show(ui);
-                        Badge::new("Live Telemetry").accent().palette(palette).show(ui);
+                        Badge::new("Live Telemetry").accent().dot(true).palette(palette).show(ui);
                     });
                 });
-                ui.label("HJKL navigate • Ctrl+HJKL jump section • Shift+H/L adjust slider • F/Enter activate");
+                ui.label("HJKL navigate • [i]/Enter type text • [Esc] done • Ctrl+HJKL jump section • Shift+H/L adjust slider");
                 ui.add_space(10.0);
 
                 // ── Top Search Bar ──
                 let (search_card_resp, _) = Card::new()
+                    .focused(active_section == DashSection::SearchBar)
+                    .spring_params(custom_spring_params)
                     .palette(palette)
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.label("🔎 Quick Find:");
+                            ui.add_space(6.0);
 
+                            let is_search_focused = focused == Some(SearchInput);
+                            let is_search_active = is_search_focused && state.text_focused;
+                            let search_w = (ui.available_width() - 250.0).max(180.0);
                             let resp = TextInput::new(&mut state.search_term)
                                 .placeholder("Filter parameters, services, endpoints...")
                                 .icon("🔍")
                                 .clear_button(true)
+                                .width(search_w)
                                 .palette(palette)
                                 .spring_params(custom_spring_params)
+                                .with_state(&mut state.search_input_state)
+                                .focused(is_search_active)
+                                .vim_buffer(&mut state.search_vim)
                                 .show(ui);
                             if (resp.hovered() && pointer_moved) || resp.clicked() {
                                 state.record_widget_focus(SearchInput);
+                                if resp.clicked() {
+                                    state.text_focused = true;
+                                    state.search_vim.mode = VimMode::Insert;
+                                }
                             }
-                            if focused == Some(SearchInput) {
+                            if is_search_focused {
                                 highlight_target = Some(resp.rect);
                                 highlight_rounding = Rounding::same(6.0);
                             }
+
+                            ui.add_space(8.0);
 
                             let is_scan_focused = focused == Some(ScanButton);
                             let is_scan_triggered = is_scan_focused && matches!(action, Some(VimAction::PrimaryClick | VimAction::Enter));
@@ -847,6 +959,8 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                                 highlight_target = Some(resp.rect);
                                 highlight_rounding = Rounding::same(6.0);
                             }
+
+                            ui.add_space(6.0);
 
                             let is_clear_focused = focused == Some(ClearButton);
                             let is_clear_triggered = is_clear_focused && matches!(action, Some(VimAction::PrimaryClick | VimAction::Enter));
@@ -871,7 +985,7 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                         });
                     });
                 if active_section == DashSection::SearchBar {
-                    section_target = Some(search_card_resp.rect);
+                    section_target = Some(search_card_resp.rect.expand(2.0));
                 }
 
                 ui.add_space(10.0);
@@ -883,6 +997,8 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                         let (core_card_resp, _) = Card::new()
                             .title("⚡ Core Engine & Services")
                             .subtitle("Network protocols and hardware accelerators")
+                            .focused(active_section == DashSection::CoreEngine)
+                            .spring_params(custom_spring_params)
                             .palette(palette)
                             .show(ui, |ui| {
                                 let resp = Switch::new(&mut state.switch_turbo)
@@ -920,30 +1036,42 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                                 ui.add_space(4.0);
 
                                 ui.label("Bandwidth Throttle:");
+                                let is_bandwidth_focused = focused == Some(SliderBandwidth);
                                 let resp = Slider::new(&mut state.volume_slider, 0.0..=100.0)
                                     .suffix(" MB/s")
                                     .palette(palette)
                                     .spring_params(custom_spring_params)
+                                    .with_state(&mut state.bandwidth_slider_state)
+                                    .focused(is_bandwidth_focused && state.text_focused)
                                     .show(ui);
                                 if (resp.hovered() && pointer_moved) || resp.dragged() {
                                     state.record_widget_focus(SliderBandwidth);
                                 }
-                                if focused == Some(SliderBandwidth) { highlight_target = Some(resp.rect); }
+                                if is_bandwidth_focused {
+                                    highlight_target = Some(resp.rect);
+                                    highlight_rounding = Rounding::same(6.0);
+                                }
 
                                 ui.add_space(4.0);
                                 ui.label("Thermal Cutoff Threshold:");
+                                let is_thermal_focused = focused == Some(SliderThermal);
                                 let resp = Slider::new(&mut state.threshold_slider, 0.0..=100.0)
                                     .suffix(" °C")
                                     .palette(palette)
                                     .spring_params(custom_spring_params)
+                                    .with_state(&mut state.thermal_slider_state)
+                                    .focused(is_thermal_focused && state.text_focused)
                                     .show(ui);
                                 if (resp.hovered() && pointer_moved) || resp.dragged() {
                                     state.record_widget_focus(SliderThermal);
                                 }
-                                if focused == Some(SliderThermal) { highlight_target = Some(resp.rect); }
+                                if is_thermal_focused {
+                                    highlight_target = Some(resp.rect);
+                                    highlight_rounding = Rounding::same(6.0);
+                                }
                             });
                         if active_section == DashSection::CoreEngine {
-                            section_target = Some(core_card_resp.rect);
+                            section_target = Some(core_card_resp.rect.expand(2.0));
                         }
 
                         ui.add_space(10.0);
@@ -952,6 +1080,8 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                         let (pipeline_card_resp, _) = Card::new()
                             .title("📊 Live Pipeline Synchronization")
                             .subtitle("Physical spring ODE catchup meter")
+                            .focused(active_section == DashSection::PipelineSync)
+                            .spring_params(custom_spring_params)
                             .palette(palette)
                             .show(ui, |ui| {
                                 egui_widgets::ProgressBar::new(state.progress_value)
@@ -1004,7 +1134,7 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                                 });
                             });
                         if active_section == DashSection::PipelineSync {
-                            section_target = Some(pipeline_card_resp.rect);
+                            section_target = Some(pipeline_card_resp.rect.expand(2.0));
                         }
                     });
 
@@ -1013,9 +1143,13 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                         let (security_card_resp, _) = Card::new()
                             .title("🔒 Security & Deployment Tier")
                             .subtitle("Access keys and environment targeting")
+                            .focused(active_section == DashSection::Security)
+                            .spring_params(custom_spring_params)
                             .palette(palette)
                             .show(ui, |ui| {
                                 // Token Input
+                                let is_token_focused = focused == Some(TokenInput);
+                                let is_token_active = is_token_focused && state.text_focused;
                                 let resp = TextInput::new(&mut state.token_input)
                                     .placeholder("Authorization secret key...")
                                     .icon("🔑")
@@ -1023,11 +1157,21 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                                     .clear_button(true)
                                     .palette(palette)
                                     .spring_params(custom_spring_params)
+                                    .with_state(&mut state.token_input_state)
+                                    .focused(is_token_active)
+                                    .vim_buffer(&mut state.token_vim)
                                     .show(ui);
                                 if (resp.hovered() && pointer_moved) || resp.clicked() {
                                     state.record_widget_focus(TokenInput);
+                                    if resp.clicked() {
+                                        state.text_focused = true;
+                                        state.token_vim.mode = VimMode::Insert;
+                                    }
                                 }
-                                if focused == Some(TokenInput) { highlight_target = Some(resp.rect); }
+                                if is_token_focused {
+                                    highlight_target = Some(resp.rect);
+                                    highlight_rounding = Rounding::same(6.0);
+                                }
 
                                 ui.add_space(10.0);
                                 ui.label("Target Cluster Tier:");
@@ -1080,7 +1224,7 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                                 if focused == Some(CheckMirror) { highlight_target = Some(resp.rect); }
                             });
                         if active_section == DashSection::Security {
-                            section_target = Some(security_card_resp.rect);
+                            section_target = Some(security_card_resp.rect.expand(2.0));
                         }
 
                         ui.add_space(10.0);
@@ -1089,6 +1233,8 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                         let (action_card_resp, _) = Card::new()
                             .title("🚀 Action Dispatcher")
                             .subtitle("Trigger instant operations across cluster")
+                            .focused(active_section == DashSection::ActionDispatcher)
+                            .spring_params(custom_spring_params)
                             .palette(palette)
                             .show(ui, |ui| {
                                 ui.horizontal_wrapped(|ui| {
@@ -1130,13 +1276,13 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
 
                                 ui.add_space(8.0);
                                 ui.horizontal(|ui| {
-                                    Badge::new("Latency: 14ms").info().palette(palette).show(ui);
-                                    Badge::new("Uptime: 99.98%").success().palette(palette).show(ui);
-                                    Badge::new("Nodes: 24/24").accent().palette(palette).show(ui);
+                                    Badge::new("Latency: 14ms").info().dot(true).palette(palette).show(ui);
+                                    Badge::new("Uptime: 99.98%").success().dot(true).palette(palette).show(ui);
+                                    Badge::new("Nodes: 24/24").accent().dot(true).palette(palette).show(ui);
                                 });
                             });
                         if active_section == DashSection::ActionDispatcher {
-                            section_target = Some(action_card_resp.rect);
+                            section_target = Some(action_card_resp.rect.expand(2.0));
                         }
                     });
                 });
@@ -1144,13 +1290,33 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                 // ── 3. Retarget + Update + Paint Phase ──
                 // Synchronize highlight styling with active ThemePalette and physics tuner
                 if let Some(item_layer) = state.dash_highlights.get_mut(&DashHighlight::Item) {
-                    item_layer.fill_color = egui::Color32::from_rgba_unmultiplied(palette.accent.r(), palette.accent.g(), palette.accent.b(), 35);
-                    item_layer.stroke = Stroke::new(2.0, palette.accent);
+                    item_layer.fill_color = egui::Color32::TRANSPARENT;
+
+                    // Resolve target mode stroke color based on active VimMode
+                    let target_stroke_color = if state.text_focused {
+                        match current_focused {
+                            SearchInput => egui_widgets::resolve_vim_mode_color(state.search_vim.mode(), Some(palette), ui.visuals()),
+                            TokenInput => egui_widgets::resolve_vim_mode_color(state.token_vim.mode(), Some(palette), ui.visuals()),
+                            SliderBandwidth => egui_widgets::resolve_vim_mode_color(state.bandwidth_slider_state.vim_buffer.mode(), Some(palette), ui.visuals()),
+                            SliderThermal => egui_widgets::resolve_vim_mode_color(state.thermal_slider_state.vim_buffer.mode(), Some(palette), ui.visuals()),
+                            _ => palette.accent,
+                        }
+                    } else {
+                        palette.accent
+                    };
+
+                    let dt = ui.input(|i| i.stable_dt).min(0.05);
+                    let cur_col = item_layer.stroke.color;
+                    let smoothed_col = egui_widgets::lerp_color(cur_col, target_stroke_color, (dt * 14.0).clamp(0.0, 1.0));
+                    item_layer.stroke = Stroke::new(1.5, smoothed_col);
+                    if smoothed_col != target_stroke_color {
+                        ui.ctx().request_repaint();
+                    }
                     item_layer.set_motion(MotionPhysics::Custom(custom_spring_params));
                 }
                 if let Some(section_layer) = state.dash_highlights.get_mut(&DashHighlight::Section) {
-                    section_layer.fill_color = egui::Color32::from_rgba_unmultiplied(palette.surface1.r(), palette.surface1.g(), palette.surface1.b(), 20);
-                    section_layer.stroke = Stroke::new(1.5, egui::Color32::from_rgba_unmultiplied(palette.accent.r(), palette.accent.g(), palette.accent.b(), 120));
+                    section_layer.fill_color = egui::Color32::TRANSPARENT;
+                    section_layer.stroke = Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(palette.accent.r(), palette.accent.g(), palette.accent.b(), 100));
                 }
 
                 if let Some(target) = section_target {

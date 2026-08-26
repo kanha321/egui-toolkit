@@ -49,6 +49,20 @@ pub enum ThemeToken {
     InfoAlt,
     /// Functional controls and system indicators (e.g. sapphire/lavender).
     SysControls,
+
+    // ── On-Color Contrast Roles (Material 3 paired roles) ──
+    /// High-contrast text/icon color rendered directly on top of [`ThemeToken::Accent`].
+    OnAccent,
+    /// High-contrast text/icon color rendered directly on top of surfaces (`Surface0..2`).
+    OnSurface,
+    /// High-contrast text/icon color rendered directly on top of [`ThemeToken::Success`].
+    OnSuccess,
+    /// High-contrast text/icon color rendered directly on top of [`ThemeToken::Warning`].
+    OnWarning,
+    /// High-contrast text/icon color rendered directly on top of [`ThemeToken::Danger`].
+    OnDanger,
+    /// High-contrast text/icon color rendered directly on top of [`ThemeToken::Info`].
+    OnInfo,
 }
 
 impl ThemeToken {
@@ -74,6 +88,12 @@ impl ThemeToken {
             Self::Info => "Info (Blue)",
             Self::InfoAlt => "Info Alt (Teal)",
             Self::SysControls => "System Controls",
+            Self::OnAccent => "On Accent",
+            Self::OnSurface => "On Surface",
+            Self::OnSuccess => "On Success",
+            Self::OnWarning => "On Warning",
+            Self::OnDanger => "On Danger",
+            Self::OnInfo => "On Info",
         }
     }
 
@@ -85,6 +105,7 @@ impl ThemeToken {
             Self::Overlay0 | Self::Overlay1 | Self::Overlay2 => "Overlays",
             Self::Text | Self::Subtext0 | Self::Subtext1 => "Typography",
             Self::Accent | Self::Success | Self::Warning | Self::Danger | Self::Info | Self::InfoAlt | Self::SysControls => "Semantic",
+            Self::OnAccent | Self::OnSurface | Self::OnSuccess | Self::OnWarning | Self::OnDanger | Self::OnInfo => "Contrast",
         }
     }
 
@@ -110,6 +131,12 @@ impl ThemeToken {
             Self::Info,
             Self::InfoAlt,
             Self::SysControls,
+            Self::OnAccent,
+            Self::OnSurface,
+            Self::OnSuccess,
+            Self::OnWarning,
+            Self::OnDanger,
+            Self::OnInfo,
         ]
     }
 }

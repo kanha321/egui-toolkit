@@ -26,6 +26,12 @@ pub fn gruvbox() -> ThemePalette {
         info: Color32::from_rgb(131, 165, 152), // Blue (83a598)
         info_alt: Color32::from_rgb(142, 192, 124), // Aqua (8ec07c)
         sys_controls: Color32::from_rgb(254, 128, 25), // Orange (fe8019)
+        on_accent: Color32::from_rgb(29, 32, 33),
+        on_surface: Color32::from_rgb(235, 219, 178),
+        on_success: Color32::from_rgb(29, 32, 33),
+        on_warning: Color32::from_rgb(29, 32, 33),
+        on_danger: Color32::from_rgb(29, 32, 33),
+        on_info: Color32::from_rgb(29, 32, 33),
         swatches: vec![
             Color32::from_rgb(251, 73, 52),
             Color32::from_rgb(254, 128, 25),

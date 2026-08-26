@@ -1,21 +1,35 @@
 //! Spring-animated numeric slider controls.
 //!
 //! Provides [`Slider`] with spring-scaling knob animations on hover/drag, active track highlights,
-//! numeric badges, and full palette integration.
+//! centered inline geometry, prominent monospace value chips, and inline Vim-enabled direct numeric editing.
 //!
 //! # State Ownership
 //!
-//! Knob scale animations are tracked in ID storage or an app-owned [`SliderState`] (`CODING_RULES §2`).
+//! Knob scale, position animations, and direct text editing are tracked in ID storage or an app-owned
+//! [`SliderState`] (`CODING_RULES §2`).
 
 use egui::{
-    emath::Numeric, pos2, vec2, Color32, Id, Rect, Response, Rounding, Sense, Shape,
+    emath::Numeric, pos2, vec2, Align, Align2, Color32, FontId, Id, Layout, Rect, Response, Rounding, Sense, Shape,
     Stroke, TextStyle, Ui, WidgetText,
 };
 use egui_themes::ThemePalette;
+use egui_vim_nav::{VimBufferState, VimMode};
 use spring_core::{Spring, SpringParams};
 use std::ops::RangeInclusive;
 
-/// Persistent animation state for interactive sliders.
+use crate::input::{InputState, TextInput};
+
+/// Layout orientation mode for [`Slider`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum SliderLayout {
+    /// Single horizontal row: label (optional) + track + prominent value badge, all centered on `center.y`.
+    #[default]
+    Inline,
+    /// Two-row stacked: Row 1 has label and value badge; Row 2 has full-width centered track.
+    Stacked,
+}
+
+/// Persistent animation and interaction state for interactive sliders.
 #[derive(Clone, Debug)]
 pub struct SliderState {
     /// Spring driving knob radius scale multiplier ($0.0 \to 1.0$).
@@ -24,6 +38,14 @@ pub struct SliderState {
     pub position_spring: Spring,
     /// Whether the initial position has been set.
     pub initialized: bool,
+    /// Whether direct numeric text editing is actively open.
+    pub editing: bool,
+    /// Live text buffer being edited in the inline text field.
+    pub edit_buffer: String,
+    /// Focus spring & animated cursor state for the inline text box.
+    pub input_state: InputState,
+    /// Dedicated modal Vim buffer state for editing.
+    pub vim_buffer: VimBufferState,
 }
 
 /// Fixed internal knob hover/scale spring — fast pop, not user-facing.
@@ -35,6 +57,10 @@ impl Default for SliderState {
             knob_scale_spring: Spring::new(0.0, KNOB_SCALE_PARAMS),
             position_spring: Spring::new(0.0, SpringParams::new(28.1, 0.64)),
             initialized: false,
+            editing: false,
+            edit_buffer: String::new(),
+            input_state: InputState::default(),
+            vim_buffer: VimBufferState::new(""),
         }
     }
 }
@@ -90,9 +116,11 @@ impl SliderState {
         }
     }
 
-    /// Returns `true` if all motion springs have settled.
+    /// Returns `true` if all motion springs and text-edit animations have settled.
     pub fn is_settled(&self) -> bool {
-        self.knob_scale_spring.is_settled() && self.position_spring.is_settled()
+        self.knob_scale_spring.is_settled()
+            && self.position_spring.is_settled()
+            && self.input_state.is_settled()
     }
 }
 
@@ -118,6 +146,7 @@ pub struct Slider<'a, T: Numeric> {
     show_value: bool,
     prefix: Option<&'a str>,
     suffix: Option<&'a str>,
+    layout: SliderLayout,
     track_height: f32,
     knob_radius: f32,
     track_active: Option<Color32>,
@@ -133,6 +162,7 @@ pub struct Slider<'a, T: Numeric> {
     palette: Option<&'a ThemePalette>,
     id_source: Option<Id>,
     external_state: Option<&'a mut SliderState>,
+    focused: bool,
 }
 
 impl<'a, T: Numeric> Slider<'a, T> {
@@ -146,6 +176,7 @@ impl<'a, T: Numeric> Slider<'a, T> {
             show_value: true,
             prefix: None,
             suffix: None,
+            layout: SliderLayout::Inline,
             track_height: 6.0,
             knob_radius: 8.0,
             track_active: None,
@@ -160,7 +191,30 @@ impl<'a, T: Numeric> Slider<'a, T> {
             palette: None,
             id_source: None,
             external_state: None,
+            focused: false,
         }
+    }
+
+    /// Sets whether this slider currently has keyboard/Vim focus.
+    pub fn focused(mut self, focused: bool) -> Self {
+        self.focused = focused;
+        self
+    }
+
+    /// Sets the layout orientation ([`SliderLayout::Inline`] or [`SliderLayout::Stacked`]).
+    pub fn layout(mut self, layout: SliderLayout) -> Self {
+        self.layout = layout;
+        self
+    }
+
+    /// Sets the layout to [`SliderLayout::Inline`] (single horizontal row with centered track).
+    pub fn inline(self) -> Self {
+        self.layout(SliderLayout::Inline)
+    }
+
+    /// Sets the layout to [`SliderLayout::Stacked`] (label and value on top, track centered below).
+    pub fn stacked(self) -> Self {
+        self.layout(SliderLayout::Stacked)
     }
 
     /// Sets an optional step increment.
@@ -275,7 +329,7 @@ impl<'a, T: Numeric> Slider<'a, T> {
     }
 
     /// Renders the slider and updates `value` upon interaction.
-    pub fn show(self, ui: &mut Ui) -> Response {
+    pub fn show(mut self, ui: &mut Ui) -> Response {
         let label_galley = self.label.as_ref().map(|l| {
             l.clone().into_galley(
                 ui,
@@ -285,53 +339,121 @@ impl<'a, T: Numeric> Slider<'a, T> {
             )
         });
 
-        let value_text = if self.show_value {
-            let mut text = String::new();
-            if let Some(p) = self.prefix {
-                text.push_str(p);
+        // Numeric string formatting
+        let formatted_val = if let Some(s) = self.step {
+            if s >= 1.0 && s.fract() == 0.0 {
+                format!("{:.0}", self.value.to_f64())
+            } else {
+                format!("{:.1}", self.value.to_f64())
             }
-            text.push_str(&format!("{:.1}", self.value.to_f64()));
-            if let Some(s) = self.suffix {
-                text.push_str(s);
-            }
-            Some(
-                WidgetText::from(text).into_galley(
-                    ui,
-                    Some(false),
-                    f32::INFINITY,
-                    TextStyle::Small,
-                ),
-            )
         } else {
-            None
+            format!("{:.1}", self.value.to_f64())
+        };
+        let display_value = format!(
+            "{}{}{}",
+            self.prefix.unwrap_or(""),
+            formatted_val,
+            self.suffix.unwrap_or("")
+        );
+
+        let value_font = FontId::monospace(12.0);
+        let value_galley = ui.painter().layout_no_wrap(
+            display_value.clone(),
+            value_font.clone(),
+            Color32::WHITE,
+        );
+
+        let badge_w = (value_galley.size().x + 18.0).max(56.0);
+        let badge_h = 22.0;
+
+        let row_height = (self.knob_radius * 2.0 + 12.0).max(28.0);
+        let total_height = match self.layout {
+            SliderLayout::Inline => row_height,
+            SliderLayout::Stacked => row_height + 22.0,
         };
 
-        let mut total_height = self.track_height.max(self.knob_radius * 2.0);
-        if label_galley.is_some() || value_text.is_some() {
-            total_height += 20.0;
-        }
-
         let desired_size = vec2(ui.available_width().max(120.0), total_height);
-        let (rect, mut response) = ui.allocate_exact_size(desired_size, Sense::click_and_drag());
+        let (rect, mut response) = ui.allocate_exact_size(desired_size, Sense::hover());
 
         // Range math
         let min_val = self.range.start().to_f64();
         let max_val = self.range.end().to_f64();
         let val_span = (max_val - min_val).max(1e-6);
 
-        let mut top_y = rect.top();
-        if label_galley.is_some() || value_text.is_some() {
-            top_y += 18.0;
-        }
+        let id = self.id_source.unwrap_or_else(|| {
+            if let Some(ref l) = self.label {
+                ui.make_persistent_id(l.text())
+            } else {
+                response.id
+            }
+        });
 
-        let track_y = top_y + self.knob_radius;
-        let track_left = rect.left() + self.knob_radius;
-        let track_right = rect.right() - self.knob_radius;
-        let track_width = (track_right - track_left).max(1.0);
+        // Geometry computation: perfectly centered on center.y
+        let (track_left, track_right, track_y, badge_rect) = match self.layout {
+            SliderLayout::Inline => {
+                let track_y = rect.center().y;
+                let track_left = if let Some(ref lg) = label_galley {
+                    rect.left() + lg.size().x + 10.0 + self.knob_radius
+                } else {
+                    rect.left() + self.knob_radius + 4.0
+                };
+                if self.show_value {
+                    let b_rect = Rect::from_center_size(
+                        pos2(rect.right() - badge_w * 0.5 - 2.0, track_y),
+                        vec2(badge_w, badge_h),
+                    );
+                    let track_right = b_rect.left() - self.knob_radius - 8.0;
+                    (track_left, track_right, track_y, b_rect)
+                } else {
+                    let track_right = rect.right() - self.knob_radius - 4.0;
+                    (track_left, track_right, track_y, Rect::ZERO)
+                }
+            }
+            SliderLayout::Stacked => {
+                let top_y = rect.top() + 10.0;
+                let track_y = rect.bottom() - self.knob_radius - 6.0;
+                let track_left = rect.left() + self.knob_radius + 4.0;
+                let track_right = rect.right() - self.knob_radius - 4.0;
+                let b_rect = if self.show_value {
+                    Rect::from_center_size(
+                        pos2(rect.right() - badge_w * 0.5 - 2.0, top_y),
+                        vec2(badge_w, badge_h),
+                    )
+                } else {
+                    Rect::ZERO
+                };
+                (track_left, track_right, track_y, b_rect)
+            }
+        };
 
-        // Interaction
-        if response.clicked() || response.dragged() {
-            if let Some(pos) = response.interact_pointer_pos() {
+        let track_width = (track_right - track_left).max(10.0);
+
+        // Fetch persistent animation and text editing state
+        let mut state: SliderState = if let Some(ref ext) = self.external_state {
+            (*ext).clone()
+        } else {
+            ui.data_mut(|d| {
+                d.get_temp(id).unwrap_or_else(|| {
+                    let mut s = SliderState::default();
+                    let current_val_normalized =
+                        ((self.value.to_f64() - min_val) / val_span).clamp(0.0, 1.0) as f32;
+                    s.position_spring = Spring::new(current_val_normalized, self.spring_params);
+                    s.knob_scale_spring = Spring::new(0.0, KNOB_SCALE_PARAMS);
+                    s.initialized = true;
+                    s
+                })
+            })
+        };
+
+        // Track interactive click and drag
+        let track_hit_rect = Rect::from_min_max(
+            pos2(track_left - self.knob_radius, track_y - self.knob_radius - 4.0),
+            pos2(track_right + self.knob_radius, track_y + self.knob_radius + 4.0),
+        );
+        let track_resp = ui.interact(track_hit_rect, id.with("track"), Sense::click_and_drag());
+
+        if !state.editing && (track_resp.clicked() || track_resp.dragged()) {
+            if let Some(pos) = track_resp.interact_pointer_pos() {
                 let normalized = ((pos.x - track_left) / track_width).clamp(0.0, 1.0) as f64;
                 let mut new_val = min_val + normalized * val_span;
 
@@ -344,11 +466,172 @@ impl<'a, T: Numeric> Slider<'a, T> {
                 response.mark_changed();
             }
         }
+        response = response.union(track_resp);
+
+        // If focused via Vim navigation, handle 'i' / 'a' to enter direct text editing
+        if self.focused && !state.editing {
+            let enter_edit = ui.input(|i| {
+                !i.modifiers.ctrl && !i.modifiers.alt && (
+                    i.key_pressed(egui::Key::I) || i.key_pressed(egui::Key::A)
+                )
+            });
+            if enter_edit {
+                state.editing = true;
+                state.edit_buffer = format!("{:.1}", self.value.to_f64());
+                let mut vbuf = VimBufferState::new(state.edit_buffer.clone());
+                vbuf.cursor = state.edit_buffer.len();
+                vbuf.mode = VimMode::Insert;
+                state.vim_buffer = vbuf;
+                state.input_state = InputState::default();
+                state.input_state.was_focused = false;
+                state.input_state.cursor_spring.spawn_from(badge_rect, 4.0, badge_rect, 1.0);
+            }
+        }
+
+        // Auto-close editing when focus is lost (e.g. user navigated away via HJKL)
+        if state.editing && !self.focused {
+            if let Ok(num) = state.edit_buffer.trim().parse::<f64>() {
+                let clamped = num.clamp(min_val, max_val);
+                *self.value = T::from_f64(clamped);
+                response.mark_changed();
+            }
+            state.editing = false;
+            state.input_state.focus_spring.reset(0.0);
+            state.input_state.cursor_spring.active = false;
+            ui.ctx().memory_mut(|m| m.stop_text_input());
+        }
+
+        // Direct numeric text editing with Vim
+        if self.show_value && badge_rect.is_positive() {
+            if state.editing {
+                // Focus morphing: spawn from badge chip to numeric cursor
+                if !state.input_state.cursor_spring.active {
+                    state.input_state.cursor_spring.spawn_from(badge_rect, 4.0, badge_rect, 1.0);
+                }
+
+                let mut child_ui = ui.child_ui(badge_rect, Layout::left_to_right(Align::Center));
+                child_ui.set_clip_rect(child_ui.clip_rect().intersect(badge_rect.expand(2.0)));
+                let stroke_color = if let Some(p) = self.palette {
+                    p.accent
+                } else {
+                    Color32::from_rgb(180, 190, 254)
+                };
+                let fill_color = if let Some(p) = self.palette {
+                    p.crust
+                } else {
+                    Color32::from_gray(25)
+                };
+                let mut input_builder = TextInput::new(&mut state.edit_buffer)
+                    .mode_indicator(false)
+                    .clear_button(false)
+                    .glow_ring(false)
+                    .padding(vec2(6.0, 2.0))
+                    .min_width(badge_w)
+                    .desired_width(badge_w)
+                    .height(badge_h)
+                    .rounding(Rounding::same(4.0))
+                    .fill(fill_color)
+                    .stroke(Stroke::new(1.0, stroke_color))
+                    .focus_stroke(Stroke::new(1.0, stroke_color))
+                    .with_state(&mut state.input_state)
+                    .vim_buffer(&mut state.vim_buffer)
+                    .focused(true)
+                    .editing(true)
+                    .id_source(id.with("vim_input"));
+
+                if let Some(p) = self.palette {
+                    input_builder = input_builder.palette(p);
+                }
+                input_builder.show(&mut child_ui);
+
+                let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                let esc_pressed = ui.input(|i| i.key_pressed(egui::Key::Escape));
+                let any_click = ui.input(|i| i.pointer.any_click());
+                let pointer_pos = ui.input(|i| i.pointer.interact_pos().unwrap_or(pos2(-1000.0, -1000.0)));
+                let clicked_outside = any_click && !badge_rect.contains(pointer_pos);
+
+                if enter_pressed || clicked_outside {
+                    let cleaned = state.edit_buffer.trim().replace('\n', "").replace('\r', "");
+                    if let Ok(num) = cleaned.parse::<f64>() {
+                        let clamped = num.clamp(min_val, max_val);
+                        *self.value = T::from_f64(clamped);
+                        response.mark_changed();
+                    }
+                    state.editing = false;
+                    state.input_state.focus_spring.reset(0.0);
+                    state.input_state.cursor_spring.active = false;
+                    ui.ctx().memory_mut(|m| m.stop_text_input());
+                } else if esc_pressed && state.vim_buffer.mode == VimMode::Normal {
+                    state.editing = false;
+                    state.input_state.focus_spring.reset(0.0);
+                    state.input_state.cursor_spring.active = false;
+                    ui.ctx().memory_mut(|m| m.stop_text_input());
+                }
+            } else {
+                let badge_resp = ui.interact(badge_rect, id.with("badge_click"), Sense::click());
+                if badge_resp.clicked() {
+                    state.editing = true;
+                    state.edit_buffer = format!("{:.1}", self.value.to_f64());
+                    // Click directly enters Insert mode (no key event in the queue)
+                    let mut vbuf = VimBufferState::new(state.edit_buffer.clone());
+                    vbuf.cursor = state.edit_buffer.len(); // cursor at end for click
+                    vbuf.mode = VimMode::Insert;
+                    state.vim_buffer = vbuf;
+                    state.input_state = InputState::default();
+                    state.input_state.cursor_spring.spawn_from(rect, 6.0, badge_rect, 1.5);
+                }
+                if badge_resp.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Text);
+                }
+
+                if ui.is_rect_visible(badge_rect) {
+                    let painter = ui.painter();
+                    let badge_bg = if let Some(p) = self.palette {
+                        p.crust
+                    } else {
+                        Color32::from_gray(25)
+                    };
+                    let badge_stroke = if badge_resp.hovered() {
+                        Stroke::new(
+                            1.0,
+                            if let Some(p) = self.palette {
+                                p.accent
+                            } else {
+                                Color32::from_rgb(180, 190, 254)
+                            },
+                        )
+                    } else {
+                        Stroke::new(
+                            1.0,
+                            if let Some(p) = self.palette {
+                                p.overlay1.linear_multiply(0.6)
+                            } else {
+                                Color32::from_gray(60)
+                            },
+                        )
+                    };
+
+                    painter.add(Shape::rect_filled(badge_rect, Rounding::same(4.0), badge_bg));
+                    painter.add(Shape::rect_stroke(badge_rect, Rounding::same(4.0), badge_stroke));
+
+                    let text_color = if let Some(p) = self.palette {
+                        p.text
+                    } else {
+                        Color32::WHITE
+                    };
+                    painter.text(
+                        badge_rect.center(),
+                        Align2::CENTER_CENTER,
+                        &display_value,
+                        value_font.clone(),
+                        text_color,
+                    );
+                }
+            }
+        }
 
         // Motion physics
         let dt = ui.input(|i| i.stable_dt).min(0.05);
-        let is_interacting = response.hovered() || response.dragged();
-
         let pos_params = self.spring_params;
         let click_momentum = self.click_momentum;
         let knob_scale_mult = self.knob_scale_mult;
@@ -357,53 +640,30 @@ impl<'a, T: Numeric> Slider<'a, T> {
             ((self.value.to_f64() - min_val) / val_span).clamp(0.0, 1.0) as f32;
 
         let (knob_scale_factor, visual_progress) = if self.motion {
-            if let Some(state) = self.external_state {
-                state.update(
-                    dt,
-                    current_val_normalized,
-                    response.hovered(),
-                    response.dragged(),
-                    response.clicked(),
-                    pos_params,
-                    click_momentum,
-                    ui.ctx(),
-                );
-                (state.knob_scale_spring.value(), state.position_spring.value())
-            } else {
-                let id = self.id_source.unwrap_or_else(|| {
-                    if let Some(ref l) = self.label {
-                        ui.make_persistent_id(l.text())
-                    } else {
-                        response.id
-                    }
-                });
-                let mut state: SliderState = ui.data_mut(|d| {
-                    d.get_temp(id).unwrap_or_else(|| {
-                        let mut s = SliderState::default();
-                        s.position_spring = Spring::new(current_val_normalized, pos_params);
-                        s.knob_scale_spring = Spring::new(0.0, KNOB_SCALE_PARAMS);
-                        s.initialized = true;
-                        s
-                    })
-                });
-
-                state.update(
-                    dt,
-                    current_val_normalized,
-                    response.hovered(),
-                    response.dragged(),
-                    response.clicked(),
-                    pos_params,
-                    click_momentum,
-                    ui.ctx(),
-                );
-                let values = (state.knob_scale_spring.value(), state.position_spring.value());
-                ui.data_mut(|d| d.insert_temp(id, state));
-                values
-            }
+            state.update(
+                dt,
+                current_val_normalized,
+                response.hovered(),
+                response.dragged(),
+                response.clicked(),
+                pos_params,
+                click_momentum,
+                ui.ctx(),
+            );
+            (state.knob_scale_spring.value(), state.position_spring.value())
         } else {
-            (if is_interacting { 1.0 } else { 0.0 }, current_val_normalized)
+            (
+                if response.hovered() || response.dragged() { 1.0 } else { 0.0 },
+                current_val_normalized,
+            )
         };
+
+        // Write state back
+        if let Some(ref mut ext) = self.external_state {
+            **ext = state;
+        } else {
+            ui.data_mut(|d| d.insert_temp(id, state));
+        }
 
         let knob_x = track_left + visual_progress.clamp(0.0, 1.0) * track_width;
         let knob_center = pos2(knob_x, track_y);
@@ -413,7 +673,7 @@ impl<'a, T: Numeric> Slider<'a, T> {
             if let Some(p) = self.palette {
                 (
                     self.track_active.unwrap_or(p.accent),
-                    self.track_inactive.unwrap_or(p.surface1),
+                    self.track_inactive.unwrap_or(p.surface0),
                     self.knob_fill.unwrap_or(if p.dark { p.crust } else { Color32::WHITE }),
                     self.knob_stroke.unwrap_or(Stroke::new(2.0, p.accent)),
                     self.label_color.unwrap_or(p.text),
@@ -432,18 +692,13 @@ impl<'a, T: Numeric> Slider<'a, T> {
         if ui.is_rect_visible(rect) {
             let painter = ui.painter();
 
-            // Render labels row if present
-            if label_galley.is_some() || value_text.is_some() {
-                if let Some(ref lg) = label_galley {
-                    painter.galley(pos2(rect.left(), rect.top()), lg.clone(), label_col);
-                }
-                if let Some(ref vt) = value_text {
-                    painter.galley(
-                        pos2(rect.right() - vt.size().x, rect.top()),
-                        vt.clone(),
-                        label_col.linear_multiply(0.8),
-                    );
-                }
+            // Render label if present
+            if let Some(ref lg) = label_galley {
+                let label_pos = match self.layout {
+                    SliderLayout::Inline => pos2(rect.left(), rect.center().y - lg.size().y * 0.5),
+                    SliderLayout::Stacked => pos2(rect.left(), rect.top() + 2.0),
+                };
+                painter.galley(label_pos, lg.clone(), label_col);
             }
 
             // Inactive track

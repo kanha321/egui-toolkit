@@ -1041,6 +1041,7 @@ dependencies = [
  "egui",
  "egui-spring",
  "egui-themes",
+ "egui-vim-nav",
  "spring-core",
 ]
 

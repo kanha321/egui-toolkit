@@ -25,7 +25,7 @@ impl Default for HighlightConfig {
     fn default() -> Self {
         Self {
             motion: MotionPhysics::Default,
-            fill: Color32::from_rgba_unmultiplied(0, 255, 136, 14),
+            fill: Color32::TRANSPARENT,
             stroke: Stroke::new(1.5, Color32::from_rgb(0, 255, 136)),
             rounding: Rounding::same(6.0),
             padding: 3.0,
@@ -39,12 +39,12 @@ impl HighlightConfig {
         Self::default()
     }
 
-    /// Creates a new configuration whose fill and stroke derive from the palette's accent color.
+    /// Creates a new configuration whose stroke derives from the palette's accent color.
     pub fn from_palette(palette: &ThemePalette) -> Self {
         let accent = palette.accent;
         Self {
             motion: MotionPhysics::Default,
-            fill: Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 14),
+            fill: Color32::TRANSPARENT,
             stroke: Stroke::new(1.5, accent),
             rounding: Rounding::same(6.0),
             padding: 3.0,

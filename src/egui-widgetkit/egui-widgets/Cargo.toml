@@ -10,6 +10,7 @@ egui = { workspace = true }
 spring-core = { path = "../spring-core" }
 egui-themes = { path = "../egui-themes" }
 egui-spring = { path = "../egui-spring" }
+egui-vim-nav = { path = "../egui-vim-nav" }
 
 [dev-dependencies]
 eframe = { workspace = true }

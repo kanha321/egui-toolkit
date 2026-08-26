@@ -277,10 +277,10 @@ impl<'a> Switch<'a> {
             if let Some(p) = self.palette {
                 (
                     self.track_fill_on.unwrap_or(p.accent),
-                    self.track_fill_off.unwrap_or(p.surface1),
+                    self.track_fill_off.unwrap_or(p.crust),
                     self.thumb_fill_on.unwrap_or(if p.dark { p.crust } else { Color32::WHITE }),
-                    self.thumb_fill_off.unwrap_or(p.text),
-                    self.track_stroke.unwrap_or(Stroke::new(1.0, p.surface2)),
+                    self.thumb_fill_off.unwrap_or(p.overlay1),
+                    self.track_stroke.unwrap_or(Stroke::new(1.0, p.surface1)),
                     self.label_color.unwrap_or(p.text),
                 )
             } else {

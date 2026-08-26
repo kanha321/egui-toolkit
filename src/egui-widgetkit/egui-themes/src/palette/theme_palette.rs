@@ -43,6 +43,14 @@ pub struct ThemePalette {
     pub info_alt: Color32,
     pub sys_controls: Color32,
 
+    // ── On-Color Contrast Tokens (Material 3 paired roles) ──
+    pub on_accent: Color32,
+    pub on_surface: Color32,
+    pub on_success: Color32,
+    pub on_warning: Color32,
+    pub on_danger: Color32,
+    pub on_info: Color32,
+
     // ── Designer Swatches Strip ──
     pub swatches: Vec<Color32>,
 }
@@ -76,6 +84,12 @@ impl ThemePalette {
             ThemeToken::Info => self.info,
             ThemeToken::InfoAlt => self.info_alt,
             ThemeToken::SysControls => self.sys_controls,
+            ThemeToken::OnAccent => self.on_accent,
+            ThemeToken::OnSurface => self.on_surface,
+            ThemeToken::OnSuccess => self.on_success,
+            ThemeToken::OnWarning => self.on_warning,
+            ThemeToken::OnDanger => self.on_danger,
+            ThemeToken::OnInfo => self.on_info,
         }
     }
 
@@ -101,6 +115,35 @@ impl ThemePalette {
             ThemeToken::Info => self.info = color,
             ThemeToken::InfoAlt => self.info_alt = color,
             ThemeToken::SysControls => self.sys_controls = color,
+            ThemeToken::OnAccent => self.on_accent = color,
+            ThemeToken::OnSurface => self.on_surface = color,
+            ThemeToken::OnSuccess => self.on_success = color,
+            ThemeToken::OnWarning => self.on_warning = color,
+            ThemeToken::OnDanger => self.on_danger = color,
+            ThemeToken::OnInfo => self.on_info = color,
+        }
+    }
+
+    /// Calculates the W3C relative luminance of an sRGB color ($0.0 \dots 1.0$).
+    pub fn relative_luminance(c: Color32) -> f32 {
+        fn srgb_to_linear(val: u8) -> f32 {
+            let v = val as f32 / 255.0;
+            if v <= 0.04045 {
+                v / 12.92
+            } else {
+                ((v + 0.055) / 1.055).powf(2.4)
+            }
+        }
+        0.2126 * srgb_to_linear(c.r()) + 0.7152 * srgb_to_linear(c.g()) + 0.0722 * srgb_to_linear(c.b())
+    }
+
+    /// Automatically returns either high-contrast dark (`self.crust`) or light (`self.text`) text
+    /// to guarantee maximum WCAG readability on top of any arbitrary background color.
+    pub fn contrast_on(&self, bg: Color32) -> Color32 {
+        if Self::relative_luminance(bg) > 0.38 {
+            self.crust
+        } else {
+            self.text
         }
     }
 
@@ -161,6 +204,12 @@ impl ThemePalette {
         self.info = lerp_color(self.info, target.info, factor, &mut changed);
         self.info_alt = lerp_color(self.info_alt, target.info_alt, factor, &mut changed);
         self.sys_controls = lerp_color(self.sys_controls, target.sys_controls, factor, &mut changed);
+        self.on_accent = lerp_color(self.on_accent, target.on_accent, factor, &mut changed);
+        self.on_surface = lerp_color(self.on_surface, target.on_surface, factor, &mut changed);
+        self.on_success = lerp_color(self.on_success, target.on_success, factor, &mut changed);
+        self.on_warning = lerp_color(self.on_warning, target.on_warning, factor, &mut changed);
+        self.on_danger = lerp_color(self.on_danger, target.on_danger, factor, &mut changed);
+        self.on_info = lerp_color(self.on_info, target.on_info, factor, &mut changed);
 
         // Interpolate swatches
         let n = self.swatches.len().min(target.swatches.len());

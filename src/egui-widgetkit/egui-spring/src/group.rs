@@ -104,6 +104,13 @@ impl<K: Ord + Clone> HighlightGroup<K> {
         }
     }
 
+    /// Teleports a specific highlight layer immediately to `rect` and `rounding` without animation.
+    pub fn reset_layer(&mut self, key: &K, rect: Rect, rounding: Rounding) {
+        if let Some(layer) = self.layers.get_mut(key) {
+            layer.reset_to(rect, rounding);
+        }
+    }
+
     /// Sets the target bounding rect and uniform rounding for a specific highlight layer.
     pub fn set_target_with_rounding(&mut self, key: &K, target: Rect, rounding: f32) {
         if let Some(layer) = self.layers.get_mut(key) {

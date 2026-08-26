@@ -1,7 +1,8 @@
 //! Semantic status badges, chips, and tag indicators.
 //!
-//! Provides [`Badge`] and [`StatusChip`] with status color variants, optional pulsing dots,
-//! dismiss buttons, and theme palette synchronization.
+//! Provides [`Badge`] with status color variants, high-contrast [`BadgeStyle`] modes
+//! (technical [`BadgeStyle::Outline`] and punchy [`BadgeStyle::Solid`]), optional glowing dots,
+//! and theme palette synchronization.
 
 use egui::{
     pos2, vec2, Color32, Response, Rounding, Sense, Shape, Stroke, TextStyle, Ui, Vec2,
@@ -29,15 +30,28 @@ pub enum BadgeVariant {
     Custom { fill: Color32, text: Color32 },
 }
 
+/// Visual presentation style for [`Badge`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum BadgeStyle {
+    /// Option A (Default): High-contrast technical outline pill.
+    /// Deep dark container fill (`p.crust`), sharp 1px semantic border,
+    /// crisp high-contrast text (`p.text`), and a glowing status dot.
+    #[default]
+    Outline,
+    /// Option B: 100% opaque solid semantic fill paired with high-contrast `p.on_*` text.
+    Solid,
+}
+
 /// A theme-aware status badge or tag pill.
 ///
 /// # Example
 /// ```no_run
-/// use egui_widgets::{Badge, BadgeVariant};
+/// use egui_widgets::{Badge, BadgeStyle, BadgeVariant};
 ///
 /// # egui::__run_test_ui(|ui| {
 /// Badge::new("Online")
 ///     .variant(BadgeVariant::Success)
+///     .outline()
 ///     .dot(true)
 ///     .show(ui);
 /// # });
@@ -45,6 +59,7 @@ pub enum BadgeVariant {
 pub struct Badge<'a> {
     text: WidgetText,
     variant: BadgeVariant,
+    style: BadgeStyle,
     dot: bool,
     fill: Option<Color32>,
     stroke: Option<Stroke>,
@@ -60,12 +75,13 @@ impl<'a> Badge<'a> {
         Self {
             text: text.into(),
             variant: BadgeVariant::Accent,
+            style: BadgeStyle::Outline,
             dot: false,
             fill: None,
             stroke: None,
             text_color: None,
             rounding: None,
-            padding: vec2(6.0, 2.5),
+            padding: vec2(8.0, 3.5),
             palette: None,
         }
     }
@@ -74,6 +90,22 @@ impl<'a> Badge<'a> {
     pub fn variant(mut self, variant: BadgeVariant) -> Self {
         self.variant = variant;
         self
+    }
+
+    /// Sets the visual presentation style ([`BadgeStyle::Outline`] or [`BadgeStyle::Solid`]).
+    pub fn style(mut self, style: BadgeStyle) -> Self {
+        self.style = style;
+        self
+    }
+
+    /// Sets the badge style to [`BadgeStyle::Outline`] (high-contrast dark container + semantic border + bright text).
+    pub fn outline(self) -> Self {
+        self.style(BadgeStyle::Outline)
+    }
+
+    /// Sets the badge style to [`BadgeStyle::Solid`] (100% opaque semantic fill + `on_*` contrast text).
+    pub fn solid(self) -> Self {
+        self.style(BadgeStyle::Solid)
     }
 
     /// Shortcut for [`BadgeVariant::Accent`].
@@ -136,7 +168,7 @@ impl<'a> Badge<'a> {
         self
     }
 
-    /// Sets inner margin padding (default `vec2(6.0, 2.5)`).
+    /// Sets inner margin padding (default `vec2(8.0, 3.5)`).
     pub fn padding(mut self, padding: impl Into<Vec2>) -> Self {
         self.padding = padding.into();
         self
@@ -159,7 +191,7 @@ impl<'a> Badge<'a> {
 
         let mut content_w = text_galley.size().x;
         if self.dot {
-            content_w += 10.0;
+            content_w += 12.0;
         }
 
         let desired_size = vec2(
@@ -169,60 +201,114 @@ impl<'a> Badge<'a> {
 
         let (rect, response) = ui.allocate_exact_size(desired_size, Sense::hover());
 
-        // Resolve colors
+        // Resolve colors based on ThemePalette and BadgeStyle
         let (bg_fill, bg_stroke, text_color, dot_color) = if let Some(p) = self.palette {
-            match self.variant {
-                BadgeVariant::Accent => (
-                    self.fill.unwrap_or(p.accent.linear_multiply(0.20)),
-                    self.stroke.unwrap_or(Stroke::new(1.0, p.accent.linear_multiply(0.40))),
-                    self.text_color.unwrap_or(p.accent),
-                    p.accent,
-                ),
-                BadgeVariant::Success => (
-                    self.fill.unwrap_or(p.success.linear_multiply(0.20)),
-                    self.stroke.unwrap_or(Stroke::new(1.0, p.success.linear_multiply(0.40))),
-                    self.text_color.unwrap_or(p.success),
-                    p.success,
-                ),
-                BadgeVariant::Warning => (
-                    self.fill.unwrap_or(p.warning.linear_multiply(0.20)),
-                    self.stroke.unwrap_or(Stroke::new(1.0, p.warning.linear_multiply(0.40))),
-                    self.text_color.unwrap_or(p.warning),
-                    p.warning,
-                ),
-                BadgeVariant::Danger => (
-                    self.fill.unwrap_or(p.danger.linear_multiply(0.20)),
-                    self.stroke.unwrap_or(Stroke::new(1.0, p.danger.linear_multiply(0.40))),
-                    self.text_color.unwrap_or(p.danger),
-                    p.danger,
-                ),
-                BadgeVariant::Info => (
-                    self.fill.unwrap_or(p.info.linear_multiply(0.20)),
-                    self.stroke.unwrap_or(Stroke::new(1.0, p.info.linear_multiply(0.40))),
-                    self.text_color.unwrap_or(p.info),
-                    p.info,
-                ),
-                BadgeVariant::Neutral => (
-                    self.fill.unwrap_or(p.surface0),
-                    self.stroke.unwrap_or(Stroke::new(1.0, p.surface1)),
-                    self.text_color.unwrap_or(p.text),
-                    p.subtext0,
-                ),
-                BadgeVariant::Custom { fill, text } => (
-                    self.fill.unwrap_or(fill),
-                    self.stroke.unwrap_or(Stroke::NONE),
-                    self.text_color.unwrap_or(text),
-                    text,
-                ),
+            match self.style {
+                BadgeStyle::Outline => match self.variant {
+                    BadgeVariant::Accent => (
+                        self.fill.unwrap_or(p.crust),
+                        self.stroke.unwrap_or(Stroke::new(1.0, p.accent)),
+                        self.text_color.unwrap_or(p.text),
+                        p.accent,
+                    ),
+                    BadgeVariant::Success => (
+                        self.fill.unwrap_or(p.crust),
+                        self.stroke.unwrap_or(Stroke::new(1.0, p.success)),
+                        self.text_color.unwrap_or(p.text),
+                        p.success,
+                    ),
+                    BadgeVariant::Warning => (
+                        self.fill.unwrap_or(p.crust),
+                        self.stroke.unwrap_or(Stroke::new(1.0, p.warning)),
+                        self.text_color.unwrap_or(p.text),
+                        p.warning,
+                    ),
+                    BadgeVariant::Danger => (
+                        self.fill.unwrap_or(p.crust),
+                        self.stroke.unwrap_or(Stroke::new(1.0, p.danger)),
+                        self.text_color.unwrap_or(p.text),
+                        p.danger,
+                    ),
+                    BadgeVariant::Info => (
+                        self.fill.unwrap_or(p.crust),
+                        self.stroke.unwrap_or(Stroke::new(1.0, p.info)),
+                        self.text_color.unwrap_or(p.text),
+                        p.info,
+                    ),
+                    BadgeVariant::Neutral => (
+                        self.fill.unwrap_or(p.crust),
+                        self.stroke.unwrap_or(Stroke::new(1.0, p.overlay1)),
+                        self.text_color.unwrap_or(p.subtext1),
+                        p.subtext0,
+                    ),
+                    BadgeVariant::Custom { fill, text } => (
+                        self.fill.unwrap_or(fill),
+                        self.stroke.unwrap_or(Stroke::NONE),
+                        self.text_color.unwrap_or(text),
+                        text,
+                    ),
+                },
+                BadgeStyle::Solid => match self.variant {
+                    BadgeVariant::Accent => (
+                        self.fill.unwrap_or(p.accent),
+                        self.stroke.unwrap_or(Stroke::NONE),
+                        self.text_color.unwrap_or(p.on_accent),
+                        p.on_accent,
+                    ),
+                    BadgeVariant::Success => (
+                        self.fill.unwrap_or(p.success),
+                        self.stroke.unwrap_or(Stroke::NONE),
+                        self.text_color.unwrap_or(p.on_success),
+                        p.on_success,
+                    ),
+                    BadgeVariant::Warning => (
+                        self.fill.unwrap_or(p.warning),
+                        self.stroke.unwrap_or(Stroke::NONE),
+                        self.text_color.unwrap_or(p.on_warning),
+                        p.on_warning,
+                    ),
+                    BadgeVariant::Danger => (
+                        self.fill.unwrap_or(p.danger),
+                        self.stroke.unwrap_or(Stroke::NONE),
+                        self.text_color.unwrap_or(p.on_danger),
+                        p.on_danger,
+                    ),
+                    BadgeVariant::Info => (
+                        self.fill.unwrap_or(p.info),
+                        self.stroke.unwrap_or(Stroke::NONE),
+                        self.text_color.unwrap_or(p.on_info),
+                        p.on_info,
+                    ),
+                    BadgeVariant::Neutral => (
+                        self.fill.unwrap_or(p.surface1),
+                        self.stroke.unwrap_or(Stroke::NONE),
+                        self.text_color.unwrap_or(p.on_surface),
+                        p.on_surface,
+                    ),
+                    BadgeVariant::Custom { fill, text } => (
+                        self.fill.unwrap_or(fill),
+                        self.stroke.unwrap_or(Stroke::NONE),
+                        self.text_color.unwrap_or(text),
+                        text,
+                    ),
+                },
             }
         } else {
             let v = ui.visuals();
-            (
-                self.fill.unwrap_or(v.selection.bg_fill.linear_multiply(0.3)),
-                self.stroke.unwrap_or(Stroke::NONE),
-                self.text_color.unwrap_or(v.widgets.active.fg_stroke.color),
-                v.selection.stroke.color,
-            )
+            match self.style {
+                BadgeStyle::Outline => (
+                    self.fill.unwrap_or(v.panel_fill),
+                    self.stroke.unwrap_or(Stroke::new(1.0, v.selection.stroke.color)),
+                    self.text_color.unwrap_or(v.widgets.active.fg_stroke.color),
+                    v.selection.stroke.color,
+                ),
+                BadgeStyle::Solid => (
+                    self.fill.unwrap_or(v.selection.bg_fill),
+                    self.stroke.unwrap_or(Stroke::NONE),
+                    self.text_color.unwrap_or(v.widgets.active.fg_stroke.color),
+                    v.widgets.active.fg_stroke.color,
+                ),
+            }
         };
 
         if ui.is_rect_visible(rect) {
@@ -238,9 +324,25 @@ impl<'a> Badge<'a> {
             // Dot
             let mut cursor_x = rect.left() + self.padding.x;
             if self.dot {
-                let dot_center = pos2(cursor_x + 3.0, rect.center().y);
-                painter.add(Shape::circle_filled(dot_center, 3.0, dot_color));
-                cursor_x += 10.0;
+                let dot_center = pos2(cursor_x + 4.0, rect.center().y);
+                if self.style == BadgeStyle::Outline {
+                    // Glowing dot: translucent outer halo + crisp core
+                    painter.add(Shape::circle_filled(
+                        dot_center,
+                        4.5,
+                        Color32::from_rgba_unmultiplied(
+                            dot_color.r(),
+                            dot_color.g(),
+                            dot_color.b(),
+                            60,
+                        ),
+                    ));
+                    painter.add(Shape::circle_filled(dot_center, 2.5, dot_color));
+                } else {
+                    // Solid badge dot
+                    painter.add(Shape::circle_filled(dot_center, 2.8, dot_color));
+                }
+                cursor_x += 12.0;
             }
 
             // Text

@@ -4,7 +4,7 @@ use egui_themes::ThemePreset;
 use egui_widgets::{
     Badge, Button, ButtonSize, ButtonState, Card, Checkbox, CheckboxState,
     InputState, ProgressBar, ProgressState, ProgressVariant, RadioButton, SegmentedTabs, Slider,
-    SliderState, Switch, SwitchSize, SwitchState, TabsState, TextInput,
+    SliderLayout, SliderState, Switch, SwitchSize, SwitchState, TabsState, TextInput,
 };
 use spring_core::SpringParams;
 
@@ -96,10 +96,17 @@ fn test_slider_bounds_and_state() {
     let mut state = SliderState::default();
     assert!(state.is_settled());
 
-    let _sl = Slider::new(&mut val, 0.0..=100.0)
+    let _sl1 = Slider::new(&mut val, 0.0..=100.0)
         .label("Volume")
         .suffix(" dB")
+        .inline()
         .with_state(&mut state);
+
+    let _sl2 = Slider::new(&mut val, 0.0..=100.0)
+        .label("Thermal Cutoff")
+        .suffix(" °C")
+        .stacked()
+        .layout(SliderLayout::Stacked);
 }
 
 #[test]
@@ -121,9 +128,11 @@ fn test_checkbox_and_radio() {
 fn test_badge_variants() {
     let palette = ThemePreset::TokyoNight.palette();
 
-    let _b1 = Badge::new("Active").success().dot(true).palette(&palette);
-    let _b2 = Badge::new("Error").danger().palette(&palette);
+    let _b1 = Badge::new("Active").success().outline().dot(true).palette(&palette);
+    let _b2 = Badge::new("Error").danger().solid().dot(true).palette(&palette);
     let _b3 = Badge::new("Info").info().palette(&palette);
+    let _b4 = Badge::new("Neutral").neutral().outline().palette(&palette);
+    let _b5 = Badge::new("Custom").solid().palette(&palette);
 }
 
 #[test]
