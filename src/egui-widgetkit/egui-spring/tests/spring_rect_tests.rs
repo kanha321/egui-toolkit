@@ -232,7 +232,7 @@ fn test_spring_cursor_snappy_morph_and_restore() {
 }
 
 #[test]
-fn test_spring_cursor_gentle_exit_physics() {
+fn test_spring_cursor_fade_exit_physics() {
     use egui_spring::SpringCursor;
     use spring_core::SpringParams;
 
@@ -241,12 +241,11 @@ fn test_spring_cursor_gentle_exit_physics() {
     let target_caret = Rect::from_min_size(Pos2::new(40.0, 20.0), egui::vec2(2.0, 16.0));
 
     cursor.spawn_from(outer_box, 6.0, target_caret, 0.5);
+    assert!(cursor.active);
+    assert_eq!(cursor.alpha_spring.target, 1.0);
 
-    // Call exit_to -> should engage Gentle physics for the outward expansion
-    cursor.exit_to(outer_box, 6.0);
+    // Call fade_out -> should smoothly fade alpha to 0 in-place
+    cursor.fade_out();
     assert!(!cursor.active);
-    let gentle = SpringParams::gentle();
-    assert_eq!(cursor.corners.base_stiffness, gentle.angular_frequency);
-    assert_eq!(cursor.corners.base_damping, gentle.damping_ratio);
-    assert_eq!(cursor.alpha_spring.params.angular_frequency, gentle.angular_frequency);
+    assert_eq!(cursor.alpha_spring.target, 0.0);
 }

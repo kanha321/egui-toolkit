@@ -1070,8 +1070,11 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                                     .with_state(&mut state.bandwidth_slider_state)
                                     .focused(is_bandwidth_focused)
                                     .show(ui);
-                                if (resp.hovered() && pointer_moved) || resp.dragged() {
+                                if (resp.hovered() && pointer_moved) || resp.dragged() || resp.clicked() {
                                     state.record_widget_focus(SliderBandwidth);
+                                    if state.bandwidth_slider_state.editing {
+                                        state.focus_level = FocusLevel::TextEditing;
+                                    }
                                 }
                                 if is_bandwidth_focused {
                                     highlight_target = Some(resp.rect);
@@ -1088,8 +1091,11 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                                     .with_state(&mut state.thermal_slider_state)
                                     .focused(is_thermal_focused)
                                     .show(ui);
-                                if (resp.hovered() && pointer_moved) || resp.dragged() {
+                                if (resp.hovered() && pointer_moved) || resp.dragged() || resp.clicked() {
                                     state.record_widget_focus(SliderThermal);
+                                    if state.thermal_slider_state.editing {
+                                        state.focus_level = FocusLevel::TextEditing;
+                                    }
                                 }
                                 if is_thermal_focused {
                                     highlight_target = Some(resp.rect);

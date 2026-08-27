@@ -105,22 +105,16 @@ impl SpringCursor {
         self.active = true;
     }
 
-    /// Exits text focus, expanding the cursor outwards towards the parent bounding box as it fades.
-    ///
-    /// Uses [`SpringParams::gentle`] for smooth, silky outward flight back into the highlight frame.
-    pub fn exit_to(&mut self, parent_rect: Rect, parent_rounding: f32) {
-        self.target_rect = parent_rect;
-        self.corners.set_target(parent_rect);
-        self.rounding_spring.set_target(parent_rounding);
-        // Keep 100% opacity during outward expansion flight; fade triggers upon arrival
-        self.alpha_spring.set_target(1.0);
+    /// Exits text focus with a simple in-place smooth fade out (without expanding outwards).
+    pub fn fade_out(&mut self) {
         self.active = false;
         self.is_morphing = false;
+        self.alpha_spring.set_target(0.0);
+    }
 
-        let gentle = SpringParams::gentle();
-        self.corners.base_stiffness = gentle.angular_frequency;
-        self.corners.base_damping = gentle.damping_ratio;
-        self.alpha_spring.params = SpringParams::new(gentle.angular_frequency, gentle.damping_ratio);
+    /// Graceful exit fallback. Performs an in-place fade out without expanding outwards.
+    pub fn exit_to(&mut self, _parent_rect: Rect, _parent_rounding: f32) {
+        self.fade_out();
     }
 
     /// Advances the cursor simulation towards its target.
@@ -135,14 +129,10 @@ impl SpringCursor {
             self.alpha_spring.set_target(1.0);
             self.active = true;
         } else if !is_focused && self.was_active {
-            // Keep 100% opacity during outward expansion flight
-            self.alpha_spring.set_target(1.0);
+            // Simple in-place fade out when losing focus
+            self.alpha_spring.set_target(0.0);
             self.active = false;
             self.is_morphing = false;
-            let gentle = SpringParams::gentle();
-            self.corners.base_stiffness = gentle.angular_frequency;
-            self.corners.base_damping = gentle.damping_ratio;
-            self.alpha_spring.params = SpringParams::new(gentle.angular_frequency, gentle.damping_ratio);
         }
         self.was_active = is_focused;
 
@@ -162,15 +152,6 @@ impl SpringCursor {
                     self.corners.base_damping = self.base_params.damping_ratio;
                 }
             }
-        } else if !self.is_settled() {
-            // Continue animating outward exit
-            let current_target = self.target_rect;
-            self.corners.update(current_target, dt);
-
-            // Fade ONLY after the 4 corners have taken the full shape of the outer highlight!
-            if self.corners.is_settled() {
-                self.alpha_spring.set_target(0.0);
-            }
         }
 
         self.alpha_spring.update(dt);
@@ -184,7 +165,7 @@ impl SpringCursor {
 
     /// Returns `true` if all corner springs, opacity, and morph parameters have settled.
     pub fn is_settled(&self) -> bool {
-        (!self.corners.initialized || self.corners.is_settled())
+        (!self.corners.initialized || self.corners.is_settled() || !self.active)
             && self.alpha_spring.is_settled()
             && self.rounding_spring.is_settled()
             && self.mode_spring.is_settled()

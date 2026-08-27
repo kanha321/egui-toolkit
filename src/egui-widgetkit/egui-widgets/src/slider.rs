@@ -503,6 +503,8 @@ impl<'a, T: Numeric> Slider<'a, T> {
                 ui.ctx().memory_mut(|m| m.stop_text_input());
             }
 
+            let badge_resp = ui.interact(badge_rect, id.with("badge_hit"), Sense::click());
+
             let mut child_ui = ui.child_ui(badge_rect, Layout::left_to_right(Align::Center));
             child_ui.set_clip_rect(ui.clip_rect());
             let stroke_color = if let Some(p) = self.palette {
@@ -541,21 +543,23 @@ impl<'a, T: Numeric> Slider<'a, T> {
             let input_resp = input_builder.show(&mut child_ui);
 
             // Handle click on badge to enter editing
-            if !state.editing && input_resp.clicked() {
+            let mut just_entered = false;
+            if !state.editing && (badge_resp.clicked() || input_resp.clicked()) {
                 state.editing = true;
                 state.edit_buffer = format!("{:.1}", self.value.to_f64());
                 let mut vbuf = VimBufferState::new(state.edit_buffer.clone());
                 vbuf.cursor = state.edit_buffer.len();
                 vbuf.mode = VimMode::Insert;
                 state.vim_buffer = vbuf;
+                just_entered = true;
             }
 
             // Handle edit completion: Enter, click outside, or Esc in Normal mode
-            if state.editing {
+            if state.editing && !just_entered {
                 let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
                 let esc_pressed = ui.input(|i| i.key_pressed(egui::Key::Escape));
                 let any_click = ui.input(|i| i.pointer.any_click());
-                let pointer_pos = ui.input(|i| i.pointer.interact_pos().unwrap_or(pos2(-1000.0, -1000.0)));
+                let pointer_pos = ui.input(|i| i.pointer.hover_pos().or(i.pointer.latest_pos()).unwrap_or(pos2(-1000.0, -1000.0)));
                 let clicked_outside = any_click && !badge_rect.contains(pointer_pos);
 
                 if enter_pressed || clicked_outside || (esc_pressed && state.vim_buffer.mode == VimMode::Normal && state.vim_buffer.parser.pending_keys_label().is_empty()) {
@@ -569,6 +573,8 @@ impl<'a, T: Numeric> Slider<'a, T> {
                     ui.ctx().memory_mut(|m| m.stop_text_input());
                 }
             }
+
+            response = response.union(input_resp).union(badge_resp);
         }
 
         // Motion physics

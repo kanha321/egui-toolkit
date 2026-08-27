@@ -123,6 +123,8 @@ pub struct InputState {
     pub last_text: Option<String>,
     /// Active swipe reveal / slide animation.
     pub swipe_anim: Option<TextSwipeAnimation>,
+    /// Spring driving smooth horizontal autoscroll when text exceeds input width.
+    pub scroll_spring: Spring,
 }
 
 impl Default for InputState {
@@ -136,6 +138,7 @@ impl Default for InputState {
             current_mode_color: None,
             last_text: None,
             swipe_anim: None,
+            scroll_spring: Spring::new(0.0, SpringParams::new(26.0, 0.48)),
         }
     }
 }
@@ -148,6 +151,7 @@ impl InputState {
         }
         self.focus_spring.set_target(if is_focused { 1.0 } else { 0.0 });
         self.focus_spring.update(dt);
+        self.scroll_spring.update(dt);
 
         if let Some(ref mut anim) = self.swipe_anim {
             anim.update(dt);
@@ -172,6 +176,7 @@ impl InputState {
     pub fn is_settled(&self) -> bool {
         self.focus_spring.is_settled()
             && self.cursor_spring.is_settled()
+            && self.scroll_spring.is_settled()
             && self.deleted_segment.as_ref().map_or(true, |d| d.fade_spring.is_settled())
             && self.swipe_anim.as_ref().map_or(true, |s| s.is_settled())
     }
@@ -450,7 +455,7 @@ impl<'a> TextInput<'a> {
         };
         let desired_size = vec2(width, height);
 
-        let (rect, response) = ui.allocate_exact_size(desired_size, Sense::hover());
+        let (rect, response) = ui.allocate_exact_size(desired_size, Sense::click());
 
         // Resolve colors
         let (bg_fill, base_stroke, focus_stroke, text_color, placeholder_color) =
@@ -587,12 +592,13 @@ impl<'a> TextInput<'a> {
 
             vim_mode_info = Some((mode, pending, smoothed_mode_color));
 
+            let click_id = id.with("vim_click");
             let resp = ui.interact(
-                edit_rect,
-                ui.make_persistent_id(self.placeholder.unwrap_or("vim_input")),
+                rect,
+                click_id,
                 Sense::click(),
             );
-            if resp.clicked() {
+            if resp.clicked() || response.clicked() {
                 vbuf.mode = VimMode::Insert;
             }
 
@@ -618,13 +624,62 @@ impl<'a> TextInput<'a> {
                 };
 
                 let galley = painter.layout_no_wrap(display_text.clone(), font_id.clone(), text_color);
-                let text_x = match self.align {
-                    TextAlign::Left => edit_rect.left(),
-                    TextAlign::Center => edit_rect.left() + ((edit_rect.width() - galley.size().x) * 0.5).max(0.0),
-                    TextAlign::Right => edit_rect.left() + (edit_rect.width() - galley.size().x).max(0.0),
+                let view_width = edit_rect.width();
+                let text_width = galley.size().x;
+
+                // Determine cursor position in text space for autoscroll calculation
+                let cursor_char_idx = if self.text.is_empty() {
+                    0
+                } else {
+                    self.text[..vbuf.cursor.min(self.text.len())].chars().count()
                 };
-                // Stabilized vertical baseline: prevents 8px jumping when text transitions between empty and non-empty
-                let text_pos = pos2(text_x, edit_rect.center().y - 8.0);
+                let cur = galley.from_ccursor(egui::text::CCursor::new(cursor_char_idx));
+                let cur_rect = galley.pos_from_cursor(&cur);
+                let cursor_local_x = cur_rect.left();
+
+                // Dynamic horizontal autoscroll calculation
+                if text_width <= view_width || self.text.is_empty() {
+                    state.scroll_spring.set_target(0.0);
+                } else {
+                    let max_scroll = (text_width - view_width + 16.0).max(0.0);
+                    let margin_left = 20.0f32;
+                    let margin_right = (view_width - 28.0).max(margin_left + 10.0);
+                    let cur_target = state.scroll_spring.target;
+                    let cursor_view_x = cursor_local_x - cur_target;
+
+                    if cursor_view_x < margin_left {
+                        state.scroll_spring.set_target((cursor_local_x - margin_left).max(0.0));
+                    } else if cursor_view_x > margin_right {
+                        state.scroll_spring.set_target((cursor_local_x - margin_right).min(max_scroll));
+                    }
+                    state.scroll_spring.set_target(state.scroll_spring.target.clamp(0.0, max_scroll));
+                }
+
+                state.scroll_spring.update(dt);
+                if !state.scroll_spring.is_settled() {
+                    ui.ctx().request_repaint();
+                }
+                let scroll_x = state.scroll_spring.value();
+
+                let base_text_x = match self.align {
+                    TextAlign::Left => edit_rect.left(),
+                    TextAlign::Center => {
+                        if text_width <= view_width {
+                            edit_rect.left() + ((view_width - text_width) * 0.5).max(0.0)
+                        } else {
+                            edit_rect.left()
+                        }
+                    }
+                    TextAlign::Right => {
+                        if text_width <= view_width {
+                            edit_rect.left() + (view_width - text_width).max(0.0)
+                        } else {
+                            edit_rect.left()
+                        }
+                    }
+                };
+                // Stabilized vertical baseline with horizontal autoscroll displacement
+                let text_pos = pos2(base_text_x - scroll_x, edit_rect.center().y - 8.0);
 
                 // Detect text insertion or deletion compared to previous frame's buffer
                 if let Some(ref last_txt) = state.last_text {
@@ -862,7 +917,7 @@ impl<'a> TextInput<'a> {
                 if self.focused && !state.cursor_spring.active {
                     state.cursor_spring.spawn_from(highlight_spawn_origin, highlight_spawn_rounding, target_caret_rect, target_rounding);
                 } else if !self.focused && state.cursor_spring.active {
-                    state.cursor_spring.exit_to(highlight_spawn_origin, highlight_spawn_rounding);
+                    state.cursor_spring.fade_out();
                 }
 
                 // Advance fluid 4-corner cursor simulation

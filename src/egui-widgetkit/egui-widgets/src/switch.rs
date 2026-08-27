@@ -48,6 +48,8 @@ pub struct SwitchState {
     pub thumb_spring: Spring,
     /// Spring driving track hover expansion / brightness ($0.0 \to 1.0$).
     pub hover_spring: Spring,
+    /// Critically damped spring driving smooth track background crossfade ($0.0 \to 1.0$).
+    pub color_spring: Spring,
 }
 
 impl Default for SwitchState {
@@ -55,6 +57,7 @@ impl Default for SwitchState {
         Self {
             thumb_spring: Spring::new(0.0, SpringParams::new(26.0, 0.46)),
             hover_spring: Spring::new(0.0, SpringParams::new(24.0, 0.50)),
+            color_spring: Spring::new(0.0, SpringParams::new(14.0, 1.0)),
         }
     }
 }
@@ -66,12 +69,14 @@ impl SwitchState {
         Self {
             thumb_spring: Spring::new(initial_val, SpringParams::new(26.0, 0.46)),
             hover_spring: Spring::new(0.0, SpringParams::new(24.0, 0.50)),
+            color_spring: Spring::new(initial_val, SpringParams::new(14.0, 1.0)),
         }
     }
 
     /// Updates internal springs and requests repaint if in motion.
     pub fn update(&mut self, dt: f32, is_on: bool, is_hovered: bool, clicked: bool, ctx: &egui::Context) {
         self.hover_spring.set_target(if is_hovered { 1.0 } else { 0.0 });
+        self.color_spring.set_target(if is_on { 1.0 } else { 0.0 });
         if clicked {
             self.thumb_spring.velocity = if is_on { 18.0 } else { -18.0 };
             self.thumb_spring.set_target(if is_on { 1.0 } else { 0.0 });
@@ -81,6 +86,7 @@ impl SwitchState {
 
         self.thumb_spring.update(dt);
         self.hover_spring.update(dt);
+        self.color_spring.update(dt);
 
         if !self.is_settled() {
             ctx.request_repaint();
@@ -89,7 +95,7 @@ impl SwitchState {
 
     /// Returns `true` if all motion springs have reached target equilibrium.
     pub fn is_settled(&self) -> bool {
-        self.thumb_spring.is_settled() && self.hover_spring.is_settled()
+        self.thumb_spring.is_settled() && self.hover_spring.is_settled() && self.color_spring.is_settled()
     }
 }
 
@@ -317,10 +323,14 @@ impl<'a> Switch<'a> {
         let is_hovered = self.focused;
         let is_on = *self.selected;
 
-        let (thumb_progress, hover_factor) = if self.motion {
+        let (thumb_progress, hover_factor, color_progress) = if self.motion {
             if let Some(state) = self.external_state {
                 state.update(dt, is_on, is_hovered, is_clicked, ui.ctx());
-                (state.thumb_spring.value(), state.hover_spring.value())
+                (
+                    state.thumb_spring.value(),
+                    state.hover_spring.value(),
+                    state.color_spring.value(),
+                )
             } else {
                 let id = self.id_source.unwrap_or_else(|| {
                     if let Some(ref l) = self.label {
@@ -334,12 +344,20 @@ impl<'a> Switch<'a> {
                 });
 
                 state.update(dt, is_on, is_hovered, is_clicked, ui.ctx());
-                let values = (state.thumb_spring.value(), state.hover_spring.value());
+                let values = (
+                    state.thumb_spring.value(),
+                    state.hover_spring.value(),
+                    state.color_spring.value(),
+                );
                 ui.data_mut(|d| d.insert_temp(id, state));
                 values
             }
         } else {
-            (if is_on { 1.0 } else { 0.0 }, if is_hovered { 1.0 } else { 0.0 })
+            (
+                if is_on { 1.0 } else { 0.0 },
+                if is_hovered { 1.0 } else { 0.0 },
+                if is_on { 1.0 } else { 0.0 },
+            )
         };
 
         if ui.is_rect_visible(rect) {
@@ -352,8 +370,8 @@ impl<'a> Switch<'a> {
             );
             let track_rounding = Rounding::same(track_h * 0.5);
 
-            // Interpolate track fill
-            let base_track_fill = lerp_color(track_off, track_on, thumb_progress.clamp(0.0, 1.0));
+            // Interpolate track fill smoothly via dedicated color crossfade
+            let base_track_fill = lerp_color(track_off, track_on, color_progress.clamp(0.0, 1.0));
             let final_track_fill = if hover_factor > 0.01 {
                 base_track_fill.linear_multiply(1.0 + hover_factor.clamp(0.0, 1.0) * 0.15)
             } else {
@@ -373,7 +391,7 @@ impl<'a> Switch<'a> {
             let thumb_x = min_x + thumb_progress * travel_distance;
             let thumb_center = pos2(thumb_x, track_rect.center().y);
 
-            let thumb_color = lerp_color(thumb_off, thumb_on, thumb_progress.clamp(0.0, 1.0));
+            let thumb_color = lerp_color(thumb_off, thumb_on, color_progress.clamp(0.0, 1.0));
 
             // Dynamic elastic squash along movement axis
             let target_val = if is_on { 1.0 } else { 0.0 };
