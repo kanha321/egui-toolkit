@@ -9,7 +9,7 @@
 //! [`SliderState`] (`CODING_RULES §2`).
 
 use egui::{
-    emath::Numeric, pos2, vec2, Align, Align2, Color32, FontId, Id, Layout, Rect, Response, Rounding, Sense, Shape,
+    emath::Numeric, pos2, vec2, Align, Color32, FontId, Id, Layout, Rect, Response, Rounding, Sense, Shape,
     Stroke, TextStyle, Ui, WidgetText,
 };
 use egui_themes::ThemePalette;
@@ -468,89 +468,97 @@ impl<'a, T: Numeric> Slider<'a, T> {
         }
         response = response.union(track_resp);
 
-        // If focused via Vim navigation, handle 'i' / 'a' to enter direct text editing
-        if self.focused && !state.editing {
-            let enter_edit = ui.input(|i| {
-                !i.modifiers.ctrl && !i.modifiers.alt && (
-                    i.key_pressed(egui::Key::I) || i.key_pressed(egui::Key::A)
-                )
-            });
-            if enter_edit {
+        // Direct numeric text editing with unified TextInput
+        if self.show_value && badge_rect.is_positive() {
+            // If focused in Level 1 Vim navigation, 'i' / 'a' enters direct numeric editing
+            if self.focused && !state.editing {
+                let enter_edit = ui.input(|i| {
+                    !i.modifiers.ctrl && !i.modifiers.alt && (
+                        i.key_pressed(egui::Key::I) || i.key_pressed(egui::Key::A)
+                    )
+                });
+                if enter_edit {
+                    state.editing = true;
+                    state.edit_buffer = format!("{:.1}", self.value.to_f64());
+                    let mut vbuf = VimBufferState::new(state.edit_buffer.clone());
+                    vbuf.cursor = state.edit_buffer.len();
+                    vbuf.mode = VimMode::Insert;
+                    state.vim_buffer = vbuf;
+                }
+            }
+
+            // Sync buffer from self.value while NOT actively editing
+            if !state.editing {
+                state.edit_buffer = format!("{:.1}", self.value.to_f64());
+            }
+
+            // Auto-close editing if Level 1 focus is lost (e.g. user moved away via HJKL)
+            if state.editing && !self.focused {
+                if let Ok(num) = state.edit_buffer.trim().parse::<f64>() {
+                    let clamped = num.clamp(min_val, max_val);
+                    *self.value = T::from_f64(clamped);
+                    response.mark_changed();
+                }
+                state.editing = false;
+                ui.ctx().memory_mut(|m| m.stop_text_input());
+            }
+
+            let mut child_ui = ui.child_ui(badge_rect, Layout::left_to_right(Align::Center));
+            child_ui.set_clip_rect(ui.clip_rect());
+            let stroke_color = if let Some(p) = self.palette {
+                p.accent
+            } else {
+                Color32::from_rgb(180, 190, 254)
+            };
+            let fill_color = if let Some(p) = self.palette {
+                p.crust
+            } else {
+                Color32::from_gray(25)
+            };
+
+            let slider_highlight = rect.expand(3.0);
+            let mut input_builder = TextInput::new(&mut state.edit_buffer)
+                .mode_indicator(false)
+                .clear_button(false)
+                .glow_ring(false)
+                .padding(vec2(6.0, 2.0))
+                .min_width(badge_w)
+                .desired_width(badge_w)
+                .height(badge_h)
+                .rounding(Rounding::same(4.0))
+                .fill(fill_color)
+                .stroke(Stroke::new(1.0, stroke_color))
+                .focus_stroke(Stroke::new(1.0, stroke_color))
+                .with_state(&mut state.input_state)
+                .vim_buffer(&mut state.vim_buffer)
+                .focused(state.editing)
+                .spawn_origin(slider_highlight, 6.0)
+                .id_source(id.with("val_input"));
+
+            if let Some(p) = self.palette {
+                input_builder = input_builder.palette(p);
+            }
+            let input_resp = input_builder.show(&mut child_ui);
+
+            // Handle click on badge to enter editing
+            if !state.editing && input_resp.clicked() {
                 state.editing = true;
                 state.edit_buffer = format!("{:.1}", self.value.to_f64());
                 let mut vbuf = VimBufferState::new(state.edit_buffer.clone());
                 vbuf.cursor = state.edit_buffer.len();
                 vbuf.mode = VimMode::Insert;
                 state.vim_buffer = vbuf;
-                state.input_state = InputState::default();
-                state.input_state.was_focused = false;
-                state.input_state.cursor_spring.spawn_from(badge_rect, 4.0, badge_rect, 1.0);
             }
-        }
 
-        // Auto-close editing when focus is lost (e.g. user navigated away via HJKL)
-        if state.editing && !self.focused {
-            if let Ok(num) = state.edit_buffer.trim().parse::<f64>() {
-                let clamped = num.clamp(min_val, max_val);
-                *self.value = T::from_f64(clamped);
-                response.mark_changed();
-            }
-            state.editing = false;
-            state.input_state.focus_spring.reset(0.0);
-            state.input_state.cursor_spring.active = false;
-            ui.ctx().memory_mut(|m| m.stop_text_input());
-        }
-
-        // Direct numeric text editing with Vim
-        if self.show_value && badge_rect.is_positive() {
+            // Handle edit completion: Enter, click outside, or Esc in Normal mode
             if state.editing {
-                // Focus morphing: spawn from badge chip to numeric cursor
-                if !state.input_state.cursor_spring.active {
-                    state.input_state.cursor_spring.spawn_from(badge_rect, 4.0, badge_rect, 1.0);
-                }
-
-                let mut child_ui = ui.child_ui(badge_rect, Layout::left_to_right(Align::Center));
-                child_ui.set_clip_rect(child_ui.clip_rect().intersect(badge_rect.expand(2.0)));
-                let stroke_color = if let Some(p) = self.palette {
-                    p.accent
-                } else {
-                    Color32::from_rgb(180, 190, 254)
-                };
-                let fill_color = if let Some(p) = self.palette {
-                    p.crust
-                } else {
-                    Color32::from_gray(25)
-                };
-                let mut input_builder = TextInput::new(&mut state.edit_buffer)
-                    .mode_indicator(false)
-                    .clear_button(false)
-                    .glow_ring(false)
-                    .padding(vec2(6.0, 2.0))
-                    .min_width(badge_w)
-                    .desired_width(badge_w)
-                    .height(badge_h)
-                    .rounding(Rounding::same(4.0))
-                    .fill(fill_color)
-                    .stroke(Stroke::new(1.0, stroke_color))
-                    .focus_stroke(Stroke::new(1.0, stroke_color))
-                    .with_state(&mut state.input_state)
-                    .vim_buffer(&mut state.vim_buffer)
-                    .focused(true)
-                    .editing(true)
-                    .id_source(id.with("vim_input"));
-
-                if let Some(p) = self.palette {
-                    input_builder = input_builder.palette(p);
-                }
-                input_builder.show(&mut child_ui);
-
                 let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
                 let esc_pressed = ui.input(|i| i.key_pressed(egui::Key::Escape));
                 let any_click = ui.input(|i| i.pointer.any_click());
                 let pointer_pos = ui.input(|i| i.pointer.interact_pos().unwrap_or(pos2(-1000.0, -1000.0)));
                 let clicked_outside = any_click && !badge_rect.contains(pointer_pos);
 
-                if enter_pressed || clicked_outside {
+                if enter_pressed || clicked_outside || (esc_pressed && state.vim_buffer.mode == VimMode::Normal && state.vim_buffer.parser.pending_keys_label().is_empty()) {
                     let cleaned = state.edit_buffer.trim().replace('\n', "").replace('\r', "");
                     if let Ok(num) = cleaned.parse::<f64>() {
                         let clamped = num.clamp(min_val, max_val);
@@ -558,74 +566,7 @@ impl<'a, T: Numeric> Slider<'a, T> {
                         response.mark_changed();
                     }
                     state.editing = false;
-                    state.input_state.focus_spring.reset(0.0);
-                    state.input_state.cursor_spring.active = false;
                     ui.ctx().memory_mut(|m| m.stop_text_input());
-                } else if esc_pressed && state.vim_buffer.mode == VimMode::Normal {
-                    state.editing = false;
-                    state.input_state.focus_spring.reset(0.0);
-                    state.input_state.cursor_spring.active = false;
-                    ui.ctx().memory_mut(|m| m.stop_text_input());
-                }
-            } else {
-                let badge_resp = ui.interact(badge_rect, id.with("badge_click"), Sense::click());
-                if badge_resp.clicked() {
-                    state.editing = true;
-                    state.edit_buffer = format!("{:.1}", self.value.to_f64());
-                    // Click directly enters Insert mode (no key event in the queue)
-                    let mut vbuf = VimBufferState::new(state.edit_buffer.clone());
-                    vbuf.cursor = state.edit_buffer.len(); // cursor at end for click
-                    vbuf.mode = VimMode::Insert;
-                    state.vim_buffer = vbuf;
-                    state.input_state = InputState::default();
-                    state.input_state.cursor_spring.spawn_from(rect, 6.0, badge_rect, 1.5);
-                }
-                if badge_resp.hovered() {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::Text);
-                }
-
-                if ui.is_rect_visible(badge_rect) {
-                    let painter = ui.painter();
-                    let badge_bg = if let Some(p) = self.palette {
-                        p.crust
-                    } else {
-                        Color32::from_gray(25)
-                    };
-                    let badge_stroke = if badge_resp.hovered() {
-                        Stroke::new(
-                            1.0,
-                            if let Some(p) = self.palette {
-                                p.accent
-                            } else {
-                                Color32::from_rgb(180, 190, 254)
-                            },
-                        )
-                    } else {
-                        Stroke::new(
-                            1.0,
-                            if let Some(p) = self.palette {
-                                p.overlay1.linear_multiply(0.6)
-                            } else {
-                                Color32::from_gray(60)
-                            },
-                        )
-                    };
-
-                    painter.add(Shape::rect_filled(badge_rect, Rounding::same(4.0), badge_bg));
-                    painter.add(Shape::rect_stroke(badge_rect, Rounding::same(4.0), badge_stroke));
-
-                    let text_color = if let Some(p) = self.palette {
-                        p.text
-                    } else {
-                        Color32::WHITE
-                    };
-                    painter.text(
-                        badge_rect.center(),
-                        Align2::CENTER_CENTER,
-                        &display_value,
-                        value_font.clone(),
-                        text_color,
-                    );
                 }
             }
         }

@@ -112,7 +112,8 @@ impl SpringCursor {
         self.target_rect = parent_rect;
         self.corners.set_target(parent_rect);
         self.rounding_spring.set_target(parent_rounding);
-        self.alpha_spring.set_target(0.0);
+        // Keep 100% opacity during outward expansion flight; fade triggers upon arrival
+        self.alpha_spring.set_target(1.0);
         self.active = false;
         self.is_morphing = false;
 
@@ -134,7 +135,8 @@ impl SpringCursor {
             self.alpha_spring.set_target(1.0);
             self.active = true;
         } else if !is_focused && self.was_active {
-            self.alpha_spring.set_target(0.0);
+            // Keep 100% opacity during outward expansion flight
+            self.alpha_spring.set_target(1.0);
             self.active = false;
             self.is_morphing = false;
             let gentle = SpringParams::gentle();
@@ -164,6 +166,11 @@ impl SpringCursor {
             // Continue animating outward exit
             let current_target = self.target_rect;
             self.corners.update(current_target, dt);
+
+            // Fade ONLY after the 4 corners have taken the full shape of the outer highlight!
+            if self.corners.is_settled() {
+                self.alpha_spring.set_target(0.0);
+            }
         }
 
         self.alpha_spring.update(dt);
@@ -177,7 +184,7 @@ impl SpringCursor {
 
     /// Returns `true` if all corner springs, opacity, and morph parameters have settled.
     pub fn is_settled(&self) -> bool {
-        (!self.active || (self.corners.initialized && self.corners.is_settled()))
+        (!self.corners.initialized || self.corners.is_settled())
             && self.alpha_spring.is_settled()
             && self.rounding_spring.is_settled()
             && self.mode_spring.is_settled()

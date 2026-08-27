@@ -40,6 +40,70 @@ impl DeletedSegment {
     }
 }
 
+/// Active swipe reveal / wipe dissolution animation for dynamic text typing and deletion.
+#[derive(Clone, Debug)]
+pub struct TextSwipeAnimation {
+    /// Character index where insertion/deletion occurred.
+    pub split_char_idx: usize,
+    /// Physical spring driving trailing text horizontal slide offset (in pixels).
+    /// Insertion: starts at -inserted_width -> relaxes to 0.0.
+    /// Deletion:  starts at +deleted_width  -> relaxes to 0.0.
+    pub shift_spring: Spring,
+    /// For typing: newly inserted text swiping in with fade (0.0 -> 1.0).
+    pub inserted_text: Option<String>,
+    pub insert_progress: Spring,
+    /// For deletion: deleted text segment wiping out with fade (1.0 -> 0.0).
+    pub deleted_text: Option<String>,
+    pub deleted_x: f32,
+    pub delete_progress: Spring,
+}
+
+impl TextSwipeAnimation {
+    pub fn new_insert(split_char_idx: usize, inserted_text: String, inserted_width: f32) -> Self {
+        let mut shift = Spring::new(-inserted_width, SpringParams::new(28.0, 0.75));
+        shift.set_target(0.0);
+        let mut insert = Spring::new(0.0, SpringParams::new(32.0, 0.85));
+        insert.set_target(1.0);
+        Self {
+            split_char_idx,
+            shift_spring: shift,
+            inserted_text: Some(inserted_text),
+            insert_progress: insert,
+            deleted_text: None,
+            deleted_x: 0.0,
+            delete_progress: Spring::new(0.0, SpringParams::new(28.0, 0.70)),
+        }
+    }
+
+    pub fn new_delete(split_char_idx: usize, deleted_text: String, deleted_width: f32, deleted_x: f32) -> Self {
+        let mut shift = Spring::new(deleted_width, SpringParams::new(28.0, 0.75));
+        shift.set_target(0.0);
+        let mut del_prog = Spring::new(1.0, SpringParams::new(26.0, 0.70));
+        del_prog.set_target(0.0);
+        Self {
+            split_char_idx,
+            shift_spring: shift,
+            inserted_text: None,
+            insert_progress: Spring::new(1.0, SpringParams::new(28.0, 0.70)),
+            deleted_text: Some(deleted_text),
+            deleted_x,
+            delete_progress: del_prog,
+        }
+    }
+
+    pub fn update(&mut self, dt: f32) {
+        self.shift_spring.update(dt);
+        self.insert_progress.update(dt);
+        self.delete_progress.update(dt);
+    }
+
+    pub fn is_settled(&self) -> bool {
+        self.shift_spring.is_settled()
+            && (self.inserted_text.is_none() || self.insert_progress.is_settled())
+            && (self.deleted_text.is_none() || self.delete_progress.is_settled())
+    }
+}
+
 /// Persistent animation state for text inputs with spring-animated focus rings.
 #[derive(Clone, Debug)]
 pub struct InputState {
@@ -55,6 +119,10 @@ pub struct InputState {
     pub was_focused: bool,
     /// Smoothly interpolated mode stroke color for crossfading between Vim modes.
     pub current_mode_color: Option<Color32>,
+    /// Last seen text buffer to detect text insertions and deletions.
+    pub last_text: Option<String>,
+    /// Active swipe reveal / slide animation.
+    pub swipe_anim: Option<TextSwipeAnimation>,
 }
 
 impl Default for InputState {
@@ -66,6 +134,8 @@ impl Default for InputState {
             deleted_segment: None,
             was_focused: false,
             current_mode_color: None,
+            last_text: None,
+            swipe_anim: None,
         }
     }
 }
@@ -78,6 +148,13 @@ impl InputState {
         }
         self.focus_spring.set_target(if is_focused { 1.0 } else { 0.0 });
         self.focus_spring.update(dt);
+
+        if let Some(ref mut anim) = self.swipe_anim {
+            anim.update(dt);
+            if anim.is_settled() {
+                self.swipe_anim = None;
+            }
+        }
 
         if let Some(ref mut del) = self.deleted_segment {
             del.fade_spring.update(dt);
@@ -96,6 +173,7 @@ impl InputState {
         self.focus_spring.is_settled()
             && self.cursor_spring.is_settled()
             && self.deleted_segment.as_ref().map_or(true, |d| d.fade_spring.is_settled())
+            && self.swipe_anim.as_ref().map_or(true, |s| s.is_settled())
     }
 }
 
@@ -139,6 +217,7 @@ pub struct TextInput<'a> {
     focused: bool,
     editing: bool,
     mode_indicator: bool,
+    spawn_origin: Option<(Rect, f32)>,
 }
 
 impl<'a> TextInput<'a> {
@@ -169,6 +248,7 @@ impl<'a> TextInput<'a> {
             focused: false,
             editing: false,
             mode_indicator: true,
+            spawn_origin: None,
         }
     }
 
@@ -193,6 +273,12 @@ impl<'a> TextInput<'a> {
     /// Sets whether this text input is actively in typing/editing mode.
     pub fn editing(mut self, editing: bool) -> Self {
         self.editing = editing;
+        self
+    }
+
+    /// Sets an external highlight rectangle and rounding for focus morphing (e.g. when embedded in a Slider).
+    pub fn spawn_origin(mut self, origin_rect: Rect, origin_rounding: f32) -> Self {
+        self.spawn_origin = Some((origin_rect, origin_rounding));
         self
     }
 
@@ -495,9 +581,43 @@ impl<'a> TextInput<'a> {
                     self.text.clone()
                 };
 
-                let galley = painter.layout_no_wrap(display_text, font_id.clone(), text_color);
+                let galley = painter.layout_no_wrap(display_text.clone(), font_id.clone(), text_color);
                 // Stabilized vertical baseline: prevents 8px jumping when text transitions between empty and non-empty
                 let text_pos = pos2(edit_rect.left(), edit_rect.center().y - 8.0);
+
+                // Detect text insertion or deletion compared to previous frame's buffer
+                if let Some(ref last_txt) = state.last_text {
+                    let old_count = last_txt.chars().count();
+                    let new_count = self.text.chars().count();
+                    if new_count > old_count {
+                        // Insertion: characters typed or pasted
+                        let num_inserted = new_count - old_count;
+                        let cursor_char_idx = self.text[..vbuf.cursor.min(self.text.len())].chars().count();
+                        let split_char_idx = cursor_char_idx.saturating_sub(num_inserted);
+                        let inserted_substr: String = self.text.chars().skip(split_char_idx).take(num_inserted).collect();
+                        let ins_galley = painter.layout_no_wrap(inserted_substr.clone(), font_id.clone(), text_color);
+                        let ins_w = ins_galley.size().x.max(7.8);
+                        state.swipe_anim = Some(TextSwipeAnimation::new_insert(split_char_idx, inserted_substr, ins_w));
+                        ui.ctx().request_repaint();
+                    } else if new_count < old_count {
+                        // Deletion: characters deleted (single char, backspace, or visual selection cut)
+                        let num_deleted = old_count - new_count;
+                        let cursor_char_idx = self.text[..vbuf.cursor.min(self.text.len())].chars().count();
+                        let split_char_idx = cursor_char_idx.min(old_count);
+                        let deleted_substr: String = last_txt.chars().skip(split_char_idx).take(num_deleted).collect();
+                        let del_galley = painter.layout_no_wrap(deleted_substr.clone(), font_id.clone(), text_color);
+                        let del_w = del_galley.size().x.max(7.8);
+
+                        // Calculate position where the deleted characters were located
+                        let prefix_substr: String = last_txt.chars().take(split_char_idx).collect();
+                        let prefix_galley = painter.layout_no_wrap(prefix_substr, font_id.clone(), text_color);
+                        let deleted_x = text_pos.x + prefix_galley.size().x;
+
+                        state.swipe_anim = Some(TextSwipeAnimation::new_delete(split_char_idx, deleted_substr, del_w, deleted_x));
+                        ui.ctx().request_repaint();
+                    }
+                }
+                state.last_text = Some(self.text.clone());
 
                 // Compute target character rect for the fluid spring cursor based on the CURRENT text and mode
                 let (target_caret_rect, target_rounding, fill_mult, stroke_width) = if self.text.is_empty() {
@@ -568,8 +688,8 @@ impl<'a> TextInput<'a> {
                                 vec2(8.0, 16.0),
                             ),
                             1.5,
-                            0.50,
-                            1.5,
+                            1.0,
+                            1.0,
                         ),
                     }
                 } else {
@@ -601,8 +721,8 @@ impl<'a> TextInput<'a> {
                                         vec2(char_w, 16.0),
                                     ),
                                     1.5,
-                                    0.50,
-                                    1.5,
+                                    1.0,
+                                    1.0,
                                 )
                             }
                         }
@@ -635,8 +755,8 @@ impl<'a> TextInput<'a> {
                                         vec2(char_w, 8.0),
                                     ),
                                     1.0,
-                                    0.35,
-                                    1.5,
+                                    1.0,
+                                    1.0,
                                 ),
                                 VimOperator::Change => (
                                     // Top half-block for Change ('c')
@@ -645,8 +765,8 @@ impl<'a> TextInput<'a> {
                                         vec2(char_w, 8.0),
                                     ),
                                     1.0,
-                                    0.35,
-                                    1.5,
+                                    1.0,
+                                    1.0,
                                 ),
                                 VimOperator::Yank => (
                                     // Hollow outline frame for Yank ('y')
@@ -664,8 +784,8 @@ impl<'a> TextInput<'a> {
                                         vec2(char_w, 8.0),
                                     ),
                                     1.0,
-                                    0.35,
-                                    1.5,
+                                    1.0,
+                                    1.0,
                                 ),
                             }
                         }
@@ -675,8 +795,8 @@ impl<'a> TextInput<'a> {
                                 vec2(char_w, 16.0),
                             ),
                             1.5,
-                            0.40,
-                            1.5,
+                            1.0,
+                            1.0,
                         ),
                     }
                 };
@@ -690,12 +810,14 @@ impl<'a> TextInput<'a> {
                 }
 
                 // Macro-to-micro focus morphing:
-                // When focused transitions from false -> true: spawn from the full outer widget highlight rect!
-                let highlight_spawn_origin = rect.expand(3.0);
+                // When focused transitions from false -> true: spawn from the outer highlight rect!
+                let (highlight_spawn_origin, highlight_spawn_rounding) = self
+                    .spawn_origin
+                    .unwrap_or_else(|| (rect.expand(3.0), 6.0));
                 if self.focused && !state.cursor_spring.active {
-                    state.cursor_spring.spawn_from(highlight_spawn_origin, 6.0, target_caret_rect, target_rounding);
+                    state.cursor_spring.spawn_from(highlight_spawn_origin, highlight_spawn_rounding, target_caret_rect, target_rounding);
                 } else if !self.focused && state.cursor_spring.active {
-                    state.cursor_spring.exit_to(highlight_spawn_origin, 6.0);
+                    state.cursor_spring.exit_to(highlight_spawn_origin, highlight_spawn_rounding);
                 }
 
                 // Advance fluid 4-corner cursor simulation
@@ -727,14 +849,127 @@ impl<'a> TextInput<'a> {
                         painter.rect_filled(sel_rect, Rounding::same(2.0), smoothed_mode_color.linear_multiply(0.25));
                     }
 
-                    // Render Base Text: 100% stable, fully rendered, never clipped by cursor bounds
-                    painter.galley(text_pos, galley.clone(), text_color);
+                    // Render Base Text with dynamic caret-driven swipe reveal and trailing slide
+                    if let Some(ref anim) = state.swipe_anim {
+                        let total_chars = display_text.chars().count();
+                        let k = anim.split_char_idx.min(total_chars);
+
+                        // 1. Prefix text (0..k)
+                        let prefix_str: String = display_text.chars().take(k).collect();
+                        let prefix_w = if !prefix_str.is_empty() {
+                            let prefix_galley = painter.layout_no_wrap(prefix_str, font_id.clone(), text_color);
+                            let pw = prefix_galley.size().x;
+                            painter.galley(text_pos, prefix_galley, text_color);
+                            pw
+                        } else {
+                            0.0
+                        };
+
+                        let cursor_pts = state.cursor_spring.corners.positions();
+                        let cursor_min_x = cursor_pts[0].x.min(cursor_pts[3].x);
+                        let cursor_max_x = cursor_pts[1].x.max(cursor_pts[2].x);
+
+                        // 2. Insertion swipe case (Caret-Attached Reveal)
+                        if let Some(ref ins_text) = anim.inserted_text {
+                            let num_inserted = ins_text.chars().count();
+                            let ins_str: String = display_text.chars().skip(k).take(num_inserted).collect();
+                            let ins_alpha = anim.insert_progress.value().clamp(0.0, 1.0);
+                            let ins_color = text_color.linear_multiply(ins_alpha);
+
+                            let ins_galley = painter.layout_no_wrap(ins_str, font_id.clone(), ins_color);
+                            let ins_w = ins_galley.size().x;
+                            let ins_pos = pos2(text_pos.x + prefix_w, text_pos.y);
+
+                            // Physical Caret-Attached Reveal Window:
+                            // The character is revealed horizontally in direct lockstep with the cursor's leading edge
+                            let reveal_min_x = text_pos.x + prefix_w;
+                            let reveal_max_x = reveal_min_x + ins_w;
+                            let clip_right = cursor_max_x.clamp(reveal_min_x, reveal_max_x + 4.0);
+                            let reveal_clip = Rect::from_min_max(
+                                pos2(reveal_min_x - 1.0, edit_rect.top() - 2.0),
+                                pos2(clip_right, edit_rect.bottom() + 2.0),
+                            );
+                            let ins_painter = painter.with_clip_rect(reveal_clip);
+                            ins_painter.galley(ins_pos, ins_galley, ins_color);
+
+                            // Trailing suffix text (k + num_inserted..) sliding smoothly into place
+                            let suffix_str: String = display_text.chars().skip(k + num_inserted).collect();
+                            if !suffix_str.is_empty() {
+                                let suffix_galley = painter.layout_no_wrap(suffix_str, font_id.clone(), text_color);
+                                let shift_offset = anim.shift_spring.value();
+                                let suffix_pos = pos2(text_pos.x + prefix_w + ins_w + shift_offset, text_pos.y);
+                                painter.galley(suffix_pos, suffix_galley, text_color);
+                            }
+                        } else if let Some(ref del_text) = anim.deleted_text {
+                            // 3. Deletion wipe-out dissolution case (Caret-Attached Wipe)
+                            let del_alpha = anim.delete_progress.value().clamp(0.0, 1.0);
+                            if del_alpha > 0.01 {
+                                let del_color = text_color.linear_multiply(del_alpha * 0.75);
+                                let del_galley = painter.layout_no_wrap(del_text.clone(), font_id.clone(), del_color);
+                                let del_w = del_galley.size().x;
+                                let del_min_x = anim.deleted_x;
+                                let del_max_x = del_min_x + del_w;
+
+                                // Physical Caret-Attached Wipe Window:
+                                // As the cursor retreats leftward, the visible portion shrinks to cursor_min_x
+                                let wipe_right = cursor_min_x.clamp(del_min_x, del_max_x);
+                                if wipe_right > del_min_x {
+                                    let wipe_clip = Rect::from_min_max(
+                                        pos2(del_min_x - 1.0, edit_rect.top() - 2.0),
+                                        pos2(wipe_right, edit_rect.bottom() + 2.0),
+                                    );
+                                    let del_painter = painter.with_clip_rect(wipe_clip);
+                                    del_painter.galley(pos2(anim.deleted_x, text_pos.y), del_galley, del_color);
+                                }
+                            }
+
+                            // Trailing suffix text (k..) sliding left to fill gap
+                            let suffix_str: String = display_text.chars().skip(k).collect();
+                            if !suffix_str.is_empty() {
+                                let suffix_galley = painter.layout_no_wrap(suffix_str, font_id.clone(), text_color);
+                                let shift_offset = anim.shift_spring.value();
+                                let suffix_pos = pos2(text_pos.x + prefix_w + shift_offset, text_pos.y);
+                                painter.galley(suffix_pos, suffix_galley, text_color);
+                            }
+                        } else {
+                            painter.galley(text_pos, galley.clone(), text_color);
+                        }
+                    } else {
+                        // Fully settled: 100% stable single galley
+                        painter.galley(text_pos, galley.clone(), text_color);
+                    }
                 }
 
                 // Render animated cursor polygon with smooth mode color crossfading
                 let cursor_fill = smoothed_mode_color.linear_multiply(fill_mult);
                 let cursor_stroke = Stroke::new(stroke_width, smoothed_mode_color);
                 state.cursor_spring.paint(ui.painter(), cursor_fill, cursor_stroke);
+
+                // High-Contrast Character Inversion:
+                // For solid block modes (Normal, Visual, OperatorPending Delete/Change), re-render the character
+                // intersecting the cursor polygon using inverted palette.crust foreground text on top of the solid block!
+                if self.focused && !self.text.is_empty() && (mode == VimMode::Normal || mode.is_operator_pending() || mode.is_visual()) && fill_mult >= 0.8 {
+                    let inverted_text_color = if let Some(p) = self.palette {
+                        p.crust
+                    } else {
+                        ui.visuals().extreme_bg_color
+                    };
+
+                    let cursor_pts = state.cursor_spring.corners.positions();
+                    let c_min_x = cursor_pts[0].x.min(cursor_pts[3].x);
+                    let c_max_x = cursor_pts[1].x.max(cursor_pts[2].x);
+                    let c_min_y = cursor_pts[0].y.min(cursor_pts[1].y);
+                    let c_max_y = cursor_pts[2].y.max(cursor_pts[3].y);
+
+                    let cursor_clip = Rect::from_min_max(
+                        pos2(c_min_x - 0.5, c_min_y - 0.5),
+                        pos2(c_max_x + 0.5, c_max_y + 0.5),
+                    );
+
+                    let inv_painter = ui.painter().with_clip_rect(cursor_clip.intersect(edit_rect));
+                    let inv_galley = inv_painter.layout_no_wrap(display_text, font_id.clone(), inverted_text_color);
+                    inv_painter.galley(text_pos, inv_galley, inverted_text_color);
+                }
             }
 
             resp

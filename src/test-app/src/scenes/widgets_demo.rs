@@ -734,7 +734,16 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                                     state.token_vim.mode = VimMode::Insert;
                                     state.token_vim.cursor = state.token_input.len();
                                 }
-                                SliderBandwidth | SliderThermal => {}
+                                SliderBandwidth => {
+                                    state.bandwidth_slider_state.editing = true;
+                                    state.bandwidth_slider_state.vim_buffer.mode = VimMode::Insert;
+                                    state.bandwidth_slider_state.vim_buffer.cursor = state.bandwidth_slider_state.edit_buffer.len();
+                                }
+                                SliderThermal => {
+                                    state.thermal_slider_state.editing = true;
+                                    state.thermal_slider_state.vim_buffer.mode = VimMode::Insert;
+                                    state.thermal_slider_state.vim_buffer.cursor = state.thermal_slider_state.edit_buffer.len();
+                                }
                                 _ => {}
                             }
                         }
@@ -1042,7 +1051,7 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                                     .palette(palette)
                                     .spring_params(custom_spring_params)
                                     .with_state(&mut state.bandwidth_slider_state)
-                                    .focused(is_bandwidth_focused && state.text_focused)
+                                    .focused(is_bandwidth_focused)
                                     .show(ui);
                                 if (resp.hovered() && pointer_moved) || resp.dragged() {
                                     state.record_widget_focus(SliderBandwidth);
@@ -1060,7 +1069,7 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                                     .palette(palette)
                                     .spring_params(custom_spring_params)
                                     .with_state(&mut state.thermal_slider_state)
-                                    .focused(is_thermal_focused && state.text_focused)
+                                    .focused(is_thermal_focused)
                                     .show(ui);
                                 if (resp.hovered() && pointer_moved) || resp.dragged() {
                                     state.record_widget_focus(SliderThermal);
