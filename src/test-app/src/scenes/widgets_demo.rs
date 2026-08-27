@@ -882,12 +882,9 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                     ctx.memory_mut(|m| m.stop_text_input());
                 }
 
-                // Handle non-button primary click actions (switches, checkboxes, radios)
+                // Handle non-button primary click actions (checkboxes, radios; switches handle triggered state internally)
                 if let Some(VimAction::PrimaryClick | VimAction::Enter) = action {
                     match focused {
-                        Some(SwitchTurbo) => state.switch_turbo = !state.switch_turbo,
-                        Some(SwitchVpn) => state.switch_vpn = !state.switch_vpn,
-                        Some(SwitchAnalytics) => state.switch_analytics = !state.switch_analytics,
                         Some(CheckNotify) => state.checkbox_newsletter = !state.checkbox_newsletter,
                         Some(CheckMirror) => state.checkbox_telemetry = !state.checkbox_telemetry,
                         Some(RadioDev) => state.radio_tier = 1,
