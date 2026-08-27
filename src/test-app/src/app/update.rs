@@ -7,6 +7,9 @@ use crate::scenes::{
 
 impl eframe::App for TestAppState {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Auto-hide cursor on keyboard activity, restore on pointer movement
+        self.cursor_autohide.update(ctx);
+
         // Advance theme morphing and synchronize visuals with egui context
         let dt = ctx.input(|i| i.stable_dt.min(0.1));
         self.theme.update(dt, ctx);
@@ -47,5 +50,10 @@ impl eframe::App for TestAppState {
                 ActiveScene::Combined => combined_demo::show(ui),
             }
         });
+
+        // Enforce frame-end cursor suppression so child widgets cannot override it
+        if self.cursor_autohide.is_hidden() {
+            ctx.output_mut(|o| o.cursor_icon = egui::CursorIcon::None);
+        }
     }
 }

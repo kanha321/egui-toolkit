@@ -18,6 +18,7 @@ pub mod config;
 pub mod corner_springs;
 pub mod cursor_spring;
 pub mod group;
+pub mod highlight_sync;
 pub mod spring_rect;
 
 pub use bezier::{build_bezier_boundary, BEZIER_KAPPA};
@@ -25,5 +26,6 @@ pub use config::HighlightConfig;
 pub use corner_springs::{CornerSprings, SpringPoint};
 pub use cursor_spring::SpringCursor;
 pub use group::HighlightGroup;
+pub use highlight_sync::{set_highlight_fill, sync_highlight_stroke_color, update_and_paint};
 pub use spring_core::{MotionPhysics, Spring, SpringParams};
 pub use spring_rect::SpringRect;

@@ -580,11 +580,13 @@ impl<'a, T: Numeric> Slider<'a, T> {
         let current_val_normalized =
             ((self.value.to_f64() - min_val) / val_span).clamp(0.0, 1.0) as f32;
 
+        let is_hovered = self.focused || response.dragged() || state.editing;
+
         let (knob_scale_factor, visual_progress) = if self.motion {
             state.update(
                 dt,
                 current_val_normalized,
-                response.hovered(),
+                is_hovered,
                 response.dragged(),
                 response.clicked(),
                 pos_params,
@@ -594,7 +596,7 @@ impl<'a, T: Numeric> Slider<'a, T> {
             (state.knob_scale_spring.value(), state.position_spring.value())
         } else {
             (
-                if response.hovered() || response.dragged() { 1.0 } else { 0.0 },
+                if is_hovered || response.dragged() { 1.0 } else { 0.0 },
                 current_val_normalized,
             )
         };

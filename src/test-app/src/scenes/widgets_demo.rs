@@ -1,9 +1,12 @@
 //! Widgets showcase scene displaying all `egui-widgets` components.
 
 use egui::{Rect, Rounding, Stroke, Ui, Vec2};
-use egui_spring::{HighlightConfig, HighlightGroup, MotionPhysics};
+use egui_spring::{HighlightConfig, HighlightGroup, MotionPhysics, sync_highlight_stroke_color, set_highlight_fill, update_and_paint};
 use egui_themes::ThemePalette;
-use egui_vim_nav::{Direction, FocusGraph, Navigator, VimAction, VimBufferState, VimKeyHandler, VimMode};
+use egui_vim_nav::{
+    Direction, FocusGraph, Navigator, Scrolloff, VimAction, VimBufferState, VimKeyHandler, VimMode,
+    FocusLevel, ModalTransition, check_modal_transition, hierarchical_move,
+};
 use egui_widgets::{
     Badge, Button, Card, Checkbox, InputState, ProgressBar, ProgressVariant, RadioButton,
     SegmentedTabs, Slider, SliderState, Switch, TextInput,
@@ -103,8 +106,10 @@ pub struct WidgetsDemoState {
     pub dash_highlights: HighlightGroup<DashHighlight>,
     pub dash_key_handler: VimKeyHandler,
     pub last_section_widget: [DashboardWidget; 5],
-    /// Whether user is actively focused inside a text input (controlling the text cursor with HJKL / Vim)
-    pub text_focused: bool,
+    /// Two-tier focus level: Navigation (HJKL between widgets) vs TextEditing (keys go to VimBuffer)
+    pub focus_level: FocusLevel,
+    /// Directional scrolloff and spring-damped viewport scrolling manager
+    pub dash_scrolloff: Scrolloff<DashboardWidget>,
 }
 
 impl Default for WidgetsDemoState {
@@ -212,7 +217,8 @@ impl Default for WidgetsDemoState {
                 TokenInput,
                 BtnDeploy,
             ],
-            text_focused: false,
+            focus_level: FocusLevel::Navigation,
+            dash_scrolloff: Scrolloff::new(),
         }
     }
 }
@@ -387,7 +393,18 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
 
     ui.add_space(12.0);
 
-    egui::ScrollArea::vertical().show(ui, |ui| {
+    let dt = ui.input(|i| i.stable_dt).min(0.05);
+
+    let scroll_area = egui::ScrollArea::vertical();
+    let is_dashboard = state.category == WidgetsCategory::CompositeDashboard;
+    let (scroll_area, applied_scroll) = if is_dashboard {
+        let (sa, val) = state.dash_scrolloff.inject_into(scroll_area, dt);
+        (sa, Some(val))
+    } else {
+        (scroll_area, None)
+    };
+
+    let scroll_output = scroll_area.show(ui, |ui| {
         match state.category {
             WidgetsCategory::ButtonsAndBadges => {
                 Card::new()
@@ -704,72 +721,70 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                 let current_focused = state.dash_nav.focused().copied().unwrap_or(SwitchTurbo);
                 let is_on_text_widget = matches!(current_focused, SearchInput | TokenInput | SliderBandwidth | SliderThermal);
 
-                // If currently focused on a non-text widget, force reset text focus
-                if !is_on_text_widget {
-                    state.text_focused = false;
+                // Force-clear text editing when focus moves to a non-text widget
+                if !is_on_text_widget && state.focus_level.is_text_editing() {
+                    state.focus_level = FocusLevel::Navigation;
                     ctx.memory_mut(|m| m.stop_text_input());
-                } else if !state.text_focused {
-                    // Check if slider editing was triggered by clicking the badge
-                    if (current_focused == SliderBandwidth && state.bandwidth_slider_state.editing)
-                        || (current_focused == SliderThermal && state.thermal_slider_state.editing)
-                    {
-                        state.text_focused = true;
-                    } else {
-                        // When sitting on a text or slider widget (in UI nav mode):
-                        // Pressing 'i', 'a', Enter, Space, or 'f' enters text editing!
-                        let enter_text = ctx.input(|i| {
-                            !i.modifiers.ctrl && !i.modifiers.alt && (
-                                i.key_pressed(egui::Key::I) || i.key_pressed(egui::Key::A)
-                                || i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::Space) || i.key_pressed(egui::Key::F)
-                            )
-                        });
-                        if enter_text {
-                            state.text_focused = true;
-                            match current_focused {
-                                SearchInput => {
-                                    state.search_vim.mode = VimMode::Insert;
-                                    state.search_vim.cursor = state.search_term.len();
-                                }
-                                TokenInput => {
-                                    state.token_vim.mode = VimMode::Insert;
-                                    state.token_vim.cursor = state.token_input.len();
-                                }
-                                SliderBandwidth => {
-                                    state.bandwidth_slider_state.editing = true;
-                                    state.bandwidth_slider_state.vim_buffer.mode = VimMode::Insert;
-                                    state.bandwidth_slider_state.vim_buffer.cursor = state.bandwidth_slider_state.edit_buffer.len();
-                                }
-                                SliderThermal => {
-                                    state.thermal_slider_state.editing = true;
-                                    state.thermal_slider_state.vim_buffer.mode = VimMode::Insert;
-                                    state.thermal_slider_state.vim_buffer.cursor = state.thermal_slider_state.edit_buffer.len();
-                                }
-                                _ => {}
+                }
+
+                // Check for slider-specific external enter/exit triggers
+                let externally_entered = state.focus_level.is_navigation() && (
+                    (current_focused == SliderBandwidth && state.bandwidth_slider_state.editing)
+                    || (current_focused == SliderThermal && state.thermal_slider_state.editing)
+                );
+                let externally_exited = state.focus_level.is_text_editing() && (
+                    (current_focused == SliderBandwidth && !state.bandwidth_slider_state.editing)
+                    || (current_focused == SliderThermal && !state.thermal_slider_state.editing)
+                );
+
+                // Determine if the active VimBuffer is in clean Normal mode (no pending ops)
+                let is_in_clean_normal = match current_focused {
+                    SearchInput => state.search_vim.mode() == VimMode::Normal && state.search_vim.parser.pending_keys_label().is_empty(),
+                    TokenInput => state.token_vim.mode() == VimMode::Normal && state.token_vim.parser.pending_keys_label().is_empty(),
+                    SliderBandwidth => !state.bandwidth_slider_state.editing || (state.bandwidth_slider_state.vim_buffer.mode() == VimMode::Normal && state.bandwidth_slider_state.vim_buffer.parser.pending_keys_label().is_empty()),
+                    SliderThermal => !state.thermal_slider_state.editing || (state.thermal_slider_state.vim_buffer.mode() == VimMode::Normal && state.thermal_slider_state.vim_buffer.parser.pending_keys_label().is_empty()),
+                    _ => true,
+                };
+
+                let section_nav_triggered = state.dash_key_handler.handle_section_input(&ctx).is_some();
+
+                let transition = check_modal_transition(
+                    state.focus_level,
+                    is_on_text_widget,
+                    externally_entered,
+                    is_in_clean_normal,
+                    externally_exited,
+                    section_nav_triggered,
+                    &ctx,
+                );
+
+                match transition {
+                    ModalTransition::EnteredText => {
+                        state.focus_level = FocusLevel::TextEditing;
+                        match current_focused {
+                            SearchInput => {
+                                state.search_vim.mode = VimMode::Insert;
+                                state.search_vim.cursor = state.search_term.len();
                             }
+                            TokenInput => {
+                                state.token_vim.mode = VimMode::Insert;
+                                state.token_vim.cursor = state.token_input.len();
+                            }
+                            SliderBandwidth => {
+                                state.bandwidth_slider_state.editing = true;
+                                state.bandwidth_slider_state.vim_buffer.mode = VimMode::Insert;
+                                state.bandwidth_slider_state.vim_buffer.cursor = state.bandwidth_slider_state.edit_buffer.len();
+                            }
+                            SliderThermal => {
+                                state.thermal_slider_state.editing = true;
+                                state.thermal_slider_state.vim_buffer.mode = VimMode::Insert;
+                                state.thermal_slider_state.vim_buffer.cursor = state.thermal_slider_state.edit_buffer.len();
+                            }
+                            _ => {}
                         }
                     }
-                } else {
-                    // Check if slider editing finished internally (e.g. user pressed Enter or clicked outside)
-                    let slider_finished = (current_focused == SliderBandwidth && !state.bandwidth_slider_state.editing)
-                        || (current_focused == SliderThermal && !state.thermal_slider_state.editing);
-
-                    // 2-Tier Modal Exit:
-                    // When in Insert/Visual/Replace/Operator mode, VimBuffer handles Escape by switching to Normal mode.
-                    // When already in clean Normal mode, Escape cleanly exits text editing back to Level 1 UI Navigation.
-                    let is_in_normal_mode = match current_focused {
-                        SearchInput => state.search_vim.mode() == VimMode::Normal && state.search_vim.parser.pending_keys_label().is_empty(),
-                        TokenInput => state.token_vim.mode() == VimMode::Normal && state.token_vim.parser.pending_keys_label().is_empty(),
-                        SliderBandwidth => !state.bandwidth_slider_state.editing || (state.bandwidth_slider_state.vim_buffer.mode() == VimMode::Normal && state.bandwidth_slider_state.vim_buffer.parser.pending_keys_label().is_empty()),
-                        SliderThermal => !state.thermal_slider_state.editing || (state.thermal_slider_state.vim_buffer.mode() == VimMode::Normal && state.thermal_slider_state.vim_buffer.parser.pending_keys_label().is_empty()),
-                        _ => true,
-                    };
-                    let esc_pressed = ctx.input(|i| i.key_pressed(egui::Key::Escape));
-                    let should_exit = slider_finished
-                        || (esc_pressed && is_in_normal_mode)
-                        || state.dash_key_handler.handle_section_input(&ctx).is_some();
-
-                    if should_exit {
-                        state.text_focused = false;
+                    ModalTransition::ExitedText => {
+                        state.focus_level = FocusLevel::Navigation;
                         state.search_vim.mode = VimMode::Normal;
                         state.token_vim.mode = VimMode::Normal;
                         state.bandwidth_slider_state.vim_buffer.mode = VimMode::Normal;
@@ -778,6 +793,7 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                         state.thermal_slider_state.editing = false;
                         ctx.memory_mut(|m| m.stop_text_input());
                     }
+                    ModalTransition::None => {}
                 }
 
                 // Suppress egui's default Tab focus cycling (unconditionally)
@@ -786,13 +802,20 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                     i.consume_key(egui::Modifiers::SHIFT, egui::Key::Tab);
                 });
 
+                let dir_input = if state.focus_level.is_navigation() {
+                    state.dash_key_handler.get_nav_direction(&ctx)
+                        .or_else(|| state.dash_key_handler.handle_section_input(&ctx))
+                } else {
+                    None
+                };
+
                 // 1. Direct Section Jumps via Ctrl+HJKL (Restores Last-Focused Widget in Target Section)
                 if let Some(sec_event) = state.dash_key_handler.handle_section_nav(
                     &ctx,
                     &mut state.dash_section_nav,
                     &state.dash_section_graph,
                 ) {
-                    state.text_focused = false;
+                    state.focus_level = FocusLevel::Navigation;
                     ctx.memory_mut(|m| m.stop_text_input());
                     let entry = state.last_section_widget[sec_event.current as usize];
                     state.dash_nav.set_focus_with_graph(Some(entry), &state.dash_graph);
@@ -800,41 +823,26 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
 
                 // 2. 2-Pass Hierarchical Navigation (HJKL / Arrows without Ctrl)
                 // When actively focused inside a text input, skip UI navigation so HJKL keys operate INSIDE the text buffer!
-                if !state.text_focused {
+                if state.focus_level.is_navigation() {
                     if let Some(dir) = state.dash_key_handler.get_nav_direction(&ctx) {
                         ctx.memory_mut(|m| m.stop_text_input());
-                        let current_widget = state.dash_nav.focused().copied().unwrap_or(SwitchTurbo);
-                        let current_section = widget_to_section(current_widget);
-
-                        // Pass 1: Try intra-section movement
-                        let mut moved_in_section = false;
-                        if let Some(event) = state.dash_nav.move_focus(&state.dash_graph, dir) {
-                            if widget_to_section(event.current) == current_section {
-                                moved_in_section = true;
-                                state.last_section_widget[current_section as usize] = event.current;
-                            } else {
-                                // Roll back if graph edge crossed section
-                                state.dash_nav.set_focus_with_graph(Some(current_widget), &state.dash_graph);
-                            }
-                        }
-
-                        // Pass 2: Boundary fallback — cross to adjacent section in section_graph
-                        if !moved_in_section {
-                            if let Some(sec_event) = state.dash_section_nav.move_focus(&state.dash_section_graph, dir) {
-                                let entry = section_entry_widget(
-                                    sec_event.current,
-                                    dir,
-                                    state.last_section_widget[sec_event.current as usize],
-                                );
-                                state.dash_nav.set_focus_with_graph(Some(entry), &state.dash_graph);
-                                state.last_section_widget[sec_event.current as usize] = entry;
-                            }
+                        if let Some(result) = hierarchical_move(
+                            dir,
+                            &mut state.dash_nav, &state.dash_graph,
+                            &mut state.dash_section_nav, &state.dash_section_graph,
+                            |w| widget_to_section(*w),
+                            |sec, dir| section_entry_widget(*sec, dir, state.last_section_widget[*sec as usize]),
+                        ) {
+                            state.last_section_widget[result.focused_section as usize] = result.focused_widget;
                         }
                     }
                 }
 
+                let current_focused_node = state.dash_nav.focused().copied();
+                state.dash_scrolloff.record_nav_event(current_focused_node, dir_input);
+
                 // Shift+H / Shift+L — adjust slider values when focused on a slider
-                if !state.text_focused {
+                if state.focus_level.is_navigation() {
                     let focused = state.dash_nav.focused().copied();
                     let shift_dir = ctx.input(|i| {
                         if !i.modifiers.shift { return None; }
@@ -863,7 +871,7 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                 }
 
                 // Action keys (F/Enter, D, Q/Esc) — suppressed when actively focused in text input
-                let action = if state.text_focused {
+                let action = if state.focus_level.is_text_editing() {
                     None
                 } else {
                     state.dash_key_handler.handle_action(&ctx)
@@ -920,7 +928,7 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                             ui.add_space(6.0);
 
                             let is_search_focused = focused == Some(SearchInput);
-                            let is_search_active = is_search_focused && state.text_focused;
+                            let is_search_active = is_search_focused && state.focus_level.is_text_editing();
                             let search_w = (ui.available_width() - 250.0).max(180.0);
                             let resp = TextInput::new(&mut state.search_term)
                                 .placeholder("Filter parameters, services, endpoints...")
@@ -936,7 +944,7 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                             if (resp.hovered() && pointer_moved) || resp.clicked() {
                                 state.record_widget_focus(SearchInput);
                                 if resp.clicked() {
-                                    state.text_focused = true;
+                                    state.focus_level = FocusLevel::TextEditing;
                                     state.search_vim.mode = VimMode::Insert;
                                 }
                             }
@@ -1010,35 +1018,47 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                             .spring_params(custom_spring_params)
                             .palette(palette)
                             .show(ui, |ui| {
+                                let is_turbo_focused = focused == Some(SwitchTurbo);
+                                let is_turbo_triggered = is_turbo_focused && matches!(action, Some(VimAction::PrimaryClick | VimAction::Enter));
                                 let resp = Switch::new(&mut state.switch_turbo)
                                     .label("Turbo Mode")
                                     .palette(palette)
                                     .spring_params(custom_spring_params)
+                                    .focused(is_turbo_focused)
+                                    .triggered(is_turbo_triggered)
                                     .show(ui);
                                 if (resp.hovered() && pointer_moved) || resp.clicked() {
                                     state.record_widget_focus(SwitchTurbo);
                                 }
-                                if focused == Some(SwitchTurbo) { highlight_target = Some(resp.rect); }
+                                if is_turbo_focused { highlight_target = Some(resp.rect); }
 
+                                let is_vpn_focused = focused == Some(SwitchVpn);
+                                let is_vpn_triggered = is_vpn_focused && matches!(action, Some(VimAction::PrimaryClick | VimAction::Enter));
                                 let resp = Switch::new(&mut state.switch_vpn)
                                     .label("Secure Gateway Tunnel")
                                     .palette(palette)
                                     .spring_params(custom_spring_params)
+                                    .focused(is_vpn_focused)
+                                    .triggered(is_vpn_triggered)
                                     .show(ui);
                                 if (resp.hovered() && pointer_moved) || resp.clicked() {
                                     state.record_widget_focus(SwitchVpn);
                                 }
-                                if focused == Some(SwitchVpn) { highlight_target = Some(resp.rect); }
+                                if is_vpn_focused { highlight_target = Some(resp.rect); }
 
+                                let is_analytics_focused = focused == Some(SwitchAnalytics);
+                                let is_analytics_triggered = is_analytics_focused && matches!(action, Some(VimAction::PrimaryClick | VimAction::Enter));
                                 let resp = Switch::new(&mut state.switch_analytics)
                                     .label("Realtime Telemetry Ingestion")
                                     .palette(palette)
                                     .spring_params(custom_spring_params)
+                                    .focused(is_analytics_focused)
+                                    .triggered(is_analytics_triggered)
                                     .show(ui);
                                 if (resp.hovered() && pointer_moved) || resp.clicked() {
                                     state.record_widget_focus(SwitchAnalytics);
                                 }
-                                if focused == Some(SwitchAnalytics) { highlight_target = Some(resp.rect); }
+                                if is_analytics_focused { highlight_target = Some(resp.rect); }
 
                                 ui.add_space(4.0);
                                 ui.separator();
@@ -1158,7 +1178,7 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                             .show(ui, |ui| {
                                 // Token Input
                                 let is_token_focused = focused == Some(TokenInput);
-                                let is_token_active = is_token_focused && state.text_focused;
+                                let is_token_active = is_token_focused && state.focus_level.is_text_editing();
                                 let resp = TextInput::new(&mut state.token_input)
                                     .placeholder("Authorization secret key...")
                                     .icon("🔑")
@@ -1173,7 +1193,7 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                                 if (resp.hovered() && pointer_moved) || resp.clicked() {
                                     state.record_widget_focus(TokenInput);
                                     if resp.clicked() {
-                                        state.text_focused = true;
+                                        state.focus_level = FocusLevel::TextEditing;
                                         state.token_vim.mode = VimMode::Insert;
                                     }
                                 }
@@ -1298,33 +1318,32 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
 
                 // ── 3. Retarget + Update + Paint Phase ──
                 // Synchronize highlight styling with active ThemePalette and physics tuner
-                if let Some(item_layer) = state.dash_highlights.get_mut(&DashHighlight::Item) {
-                    item_layer.fill_color = egui::Color32::TRANSPARENT;
+                set_highlight_fill(&mut state.dash_highlights, &DashHighlight::Item, egui::Color32::TRANSPARENT);
 
-                    // Resolve target mode stroke color based on active VimMode
-                    let target_stroke_color = if state.text_focused {
-                        match current_focused {
-                            SearchInput => egui_widgets::resolve_vim_mode_color(state.search_vim.mode(), Some(palette), ui.visuals()),
-                            TokenInput => egui_widgets::resolve_vim_mode_color(state.token_vim.mode(), Some(palette), ui.visuals()),
-                            SliderBandwidth => egui_widgets::resolve_vim_mode_color(state.bandwidth_slider_state.vim_buffer.mode(), Some(palette), ui.visuals()),
-                            SliderThermal => egui_widgets::resolve_vim_mode_color(state.thermal_slider_state.vim_buffer.mode(), Some(palette), ui.visuals()),
-                            _ => palette.accent,
-                        }
-                    } else {
-                        palette.accent
-                    };
-
-                    let dt = ui.input(|i| i.stable_dt).min(0.05);
-                    let cur_col = item_layer.stroke.color;
-                    let smoothed_col = egui_widgets::lerp_color(cur_col, target_stroke_color, (dt * 14.0).clamp(0.0, 1.0));
-                    item_layer.stroke = Stroke::new(1.5, smoothed_col);
-                    if smoothed_col != target_stroke_color {
-                        ui.ctx().request_repaint();
+                // Resolve target mode stroke color based on active VimMode
+                let target_stroke_color = if state.focus_level.is_text_editing() {
+                    match current_focused {
+                        SearchInput => egui_widgets::resolve_vim_mode_color(state.search_vim.mode(), Some(palette), ui.visuals()),
+                        TokenInput => egui_widgets::resolve_vim_mode_color(state.token_vim.mode(), Some(palette), ui.visuals()),
+                        SliderBandwidth => egui_widgets::resolve_vim_mode_color(state.bandwidth_slider_state.vim_buffer.mode(), Some(palette), ui.visuals()),
+                        SliderThermal => egui_widgets::resolve_vim_mode_color(state.thermal_slider_state.vim_buffer.mode(), Some(palette), ui.visuals()),
+                        _ => palette.accent,
                     }
+                } else {
+                    palette.accent
+                };
+
+                let dt = ui.input(|i| i.stable_dt).min(0.05);
+                if sync_highlight_stroke_color(&mut state.dash_highlights, &DashHighlight::Item, target_stroke_color, dt, 14.0) {
+                    ui.ctx().request_repaint();
+                }
+                if let Some(item_layer) = state.dash_highlights.get_mut(&DashHighlight::Item) {
                     item_layer.set_motion(MotionPhysics::Custom(custom_spring_params));
                 }
+
+                // Section highlight styling
+                set_highlight_fill(&mut state.dash_highlights, &DashHighlight::Section, egui::Color32::TRANSPARENT);
                 if let Some(section_layer) = state.dash_highlights.get_mut(&DashHighlight::Section) {
-                    section_layer.fill_color = egui::Color32::TRANSPARENT;
                     section_layer.stroke = Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(palette.accent.r(), palette.accent.g(), palette.accent.b(), 100));
                 }
 
@@ -1344,15 +1363,25 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                     );
                 }
 
-                let dt = ui.input(|i| i.stable_dt).min(0.05);
-                state.dash_highlights.update(dt);
-
-                if !state.dash_highlights.is_settled() {
-                    ui.ctx().request_repaint();
+                if let Some(target_rect) = highlight_target {
+                    state.dash_scrolloff.adjust_for_target(
+                        target_rect,
+                        ui.clip_rect(),
+                        ui.min_rect().height(),
+                    );
                 }
 
-                state.dash_highlights.paint_all(ui.painter());
+                state.dash_scrolloff.request_repaint_if_needed(ui.ctx());
+
+                // Update spring physics, check if settled, and paint all highlight layers
+                if update_and_paint(&mut state.dash_highlights, dt, ui.painter()) {
+                    ui.ctx().request_repaint();
+                }
             }
         }
     });
+
+    if applied_scroll.is_some() {
+        state.dash_scrolloff.sync_manual_scroll(&scroll_output);
+    }
 }

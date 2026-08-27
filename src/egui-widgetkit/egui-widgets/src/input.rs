@@ -177,11 +177,23 @@ impl InputState {
     }
 }
 
+/// Horizontal text alignment within a [`TextInput`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum TextAlign {
+    /// Align text to the left / leading edge (default).
+    #[default]
+    Left,
+    /// Align text to the center.
+    Center,
+    /// Align text to the right / trailing edge.
+    Right,
+}
+
 /// A theme-aware text input widget with spring-animated focus rings.
 ///
 /// # Example
 /// ```no_run
-/// use egui_widgets::TextInput;
+/// use egui_widgets::{TextInput, TextAlign};
 ///
 /// # egui::__run_test_ui(|ui| {
 /// let mut query = String::new();
@@ -189,6 +201,7 @@ impl InputState {
 ///     .placeholder("Search packages...")
 ///     .icon("🔍")
 ///     .clear_button(true)
+///     .align_center()
 ///     .show(ui);
 /// # });
 /// ```
@@ -218,6 +231,7 @@ pub struct TextInput<'a> {
     editing: bool,
     mode_indicator: bool,
     spawn_origin: Option<(Rect, f32)>,
+    align: TextAlign,
 }
 
 impl<'a> TextInput<'a> {
@@ -249,7 +263,29 @@ impl<'a> TextInput<'a> {
             editing: false,
             mode_indicator: true,
             spawn_origin: None,
+            align: TextAlign::Left,
         }
+    }
+
+    /// Sets the horizontal text alignment (Left, Center, Right). Default is [`TextAlign::Left`].
+    pub fn align(mut self, align: TextAlign) -> Self {
+        self.align = align;
+        self
+    }
+
+    /// Sets horizontal text alignment to left (default).
+    pub fn align_left(self) -> Self {
+        self.align(TextAlign::Left)
+    }
+
+    /// Sets horizontal text alignment to center.
+    pub fn align_center(self) -> Self {
+        self.align(TextAlign::Center)
+    }
+
+    /// Sets horizontal text alignment to right.
+    pub fn align_right(self) -> Self {
+        self.align(TextAlign::Right)
     }
 
     /// Sets whether to display the mode indicator label (`[NOR]`, `[INS]`) on the right.
@@ -582,8 +618,13 @@ impl<'a> TextInput<'a> {
                 };
 
                 let galley = painter.layout_no_wrap(display_text.clone(), font_id.clone(), text_color);
+                let text_x = match self.align {
+                    TextAlign::Left => edit_rect.left(),
+                    TextAlign::Center => edit_rect.left() + ((edit_rect.width() - galley.size().x) * 0.5).max(0.0),
+                    TextAlign::Right => edit_rect.left() + (edit_rect.width() - galley.size().x).max(0.0),
+                };
                 // Stabilized vertical baseline: prevents 8px jumping when text transitions between empty and non-empty
-                let text_pos = pos2(edit_rect.left(), edit_rect.center().y - 8.0);
+                let text_pos = pos2(text_x, edit_rect.center().y - 8.0);
 
                 // Detect text insertion or deletion compared to previous frame's buffer
                 if let Some(ref last_txt) = state.last_text {
@@ -621,7 +662,11 @@ impl<'a> TextInput<'a> {
 
                 // Compute target character rect for the fluid spring cursor based on the CURRENT text and mode
                 let (target_caret_rect, target_rounding, fill_mult, stroke_width) = if self.text.is_empty() {
-                    let caret_x = edit_rect.left();
+                    let caret_x = match self.align {
+                        TextAlign::Left => edit_rect.left(),
+                        TextAlign::Center => edit_rect.center().x,
+                        TextAlign::Right => edit_rect.right() - 2.0,
+                    };
                     match mode {
                         VimMode::Insert => (
                             Rect::from_min_size(
@@ -825,9 +870,14 @@ impl<'a> TextInput<'a> {
 
                 if self.text.is_empty() {
                     if let Some(ph) = self.placeholder {
+                        let (ph_pos, ph_align) = match self.align {
+                            TextAlign::Left => (pos2(edit_rect.left(), edit_rect.center().y), Align2::LEFT_CENTER),
+                            TextAlign::Center => (pos2(edit_rect.center().x, edit_rect.center().y), Align2::CENTER_CENTER),
+                            TextAlign::Right => (pos2(edit_rect.right(), edit_rect.center().y), Align2::RIGHT_CENTER),
+                        };
                         painter.text(
-                            pos2(edit_rect.left(), edit_rect.center().y),
-                            Align2::LEFT_CENTER,
+                            ph_pos,
+                            ph_align,
                             ph,
                             font_id.clone(),
                             placeholder_color,
@@ -978,6 +1028,11 @@ impl<'a> TextInput<'a> {
             let mut edit = TextEdit::singleline(self.text)
                 .password(self.password)
                 .text_color(text_color)
+                .horizontal_align(match self.align {
+                    TextAlign::Left => egui::Align::LEFT,
+                    TextAlign::Center => egui::Align::Center,
+                    TextAlign::Right => egui::Align::RIGHT,
+                })
                 .frame(false);
 
             if let Some(ph) = self.placeholder {
@@ -1013,7 +1068,7 @@ impl<'a> TextInput<'a> {
             );
             let clear_id = ui.make_persistent_id(self.placeholder.unwrap_or("txt_clear")).with("clear");
             let clear_resp = ui.interact(clear_rect, clear_id, Sense::click());
-            let clear_color = if clear_resp.hovered() { text_color } else { placeholder_color };
+            let clear_color = if clear_resp.hovered() && crate::is_hover_active(ui.ctx()) { text_color } else { placeholder_color };
             ui.painter().text(
                 clear_rect.center(),
                 Align2::CENTER_CENTER,
@@ -1104,12 +1159,8 @@ pub fn resolve_vim_mode_color(
 }
 
 /// Helper function to interpolate between two `Color32` values.
+///
+/// This is a re-export of [`egui_themes::lerp_color`] for backward compatibility.
 pub fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
-    let t = t.clamp(0.0, 1.0);
-    Color32::from_rgba_premultiplied(
-        (a.r() as f32 + (b.r() as f32 - a.r() as f32) * t) as u8,
-        (a.g() as f32 + (b.g() as f32 - a.g() as f32) * t) as u8,
-        (a.b() as f32 + (b.b() as f32 - a.b() as f32) * t) as u8,
-        (a.a() as f32 + (b.a() as f32 - a.a() as f32) * t) as u8,
-    )
+    egui_themes::lerp_color(a, b, t)
 }

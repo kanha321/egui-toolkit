@@ -8,6 +8,7 @@ description = "Vim-style (HJKL) keyboard navigation graph for egui"
 [dependencies]
 # 0.27 — pinned workspace-wide; see CODING_RULES §6
 egui = { workspace = true }
+spring-core = { path = "../spring-core", version = "0.1.0" }
 
 [dev-dependencies]
 eframe = { workspace = true }

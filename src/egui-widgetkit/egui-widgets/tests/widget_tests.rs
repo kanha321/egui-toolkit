@@ -137,6 +137,8 @@ fn test_badge_variants() {
 
 #[test]
 fn test_text_input_and_state() {
+    use egui_widgets::TextAlign;
+
     let mut query = String::from("antigravity");
     let mut state = InputState::default();
     assert!(state.is_settled());
@@ -145,7 +147,14 @@ fn test_text_input_and_state() {
         .placeholder("Type here...")
         .icon("🔍")
         .clear_button(true)
+        .align(TextAlign::Center)
         .with_state(&mut state);
+
+    let mut left_query = String::new();
+    let _left_input = TextInput::new(&mut left_query).align_left();
+
+    let mut right_query = String::new();
+    let _right_input = TextInput::new(&mut right_query).align_right();
 }
 
 #[test]

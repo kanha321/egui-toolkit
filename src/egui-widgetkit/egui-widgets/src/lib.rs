@@ -46,8 +46,17 @@ pub use badge::{Badge, BadgeStyle, BadgeVariant};
 pub use button::{Button, ButtonSize, ButtonState, ButtonVariant};
 pub use card::{Card, CardState};
 pub use checkbox::{Checkbox, CheckboxState, RadioButton};
-pub use input::{lerp_color, resolve_vim_mode_color, InputState, TextInput};
+pub use input::{lerp_color, resolve_vim_mode_color, InputState, TextAlign, TextInput};
 pub use progress::{ProgressBar, ProgressState, ProgressVariant};
 pub use slider::{Slider, SliderLayout, SliderState};
 pub use switch::{Switch, SwitchSize, SwitchState};
 pub use tabs::{SegmentedTabs, TabItem, TabsState};
+
+/// Returns whether pointer hover should be rendered visually.
+///
+/// Returns `false` if cursor autohide has hidden the cursor (e.g. during keyboard navigation),
+/// preventing ghost hover highlights on widgets when scrolling or moving focus.
+#[inline]
+pub(crate) fn is_hover_active(ctx: &egui::Context) -> bool {
+    !ctx.data(|d| d.get_temp::<bool>(egui::Id::new("_egui_cursor_autohide_hidden"))).unwrap_or(false)
+}

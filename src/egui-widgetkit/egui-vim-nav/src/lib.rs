@@ -18,16 +18,24 @@
 //! `egui-widgetkit` crate (`egui-layout`, `egui-spring`, `egui-nav-stack`,
 //! `egui-themes`, `spring-core`). It can be pulled in alone by any egui app.
 
+pub mod cursor_autohide;
 pub mod focus_graph;
+pub mod hierarchical_nav;
 pub mod key_handler;
+pub mod modal_text;
 pub mod navigator;
 pub mod register;
+pub mod scrolloff;
 pub mod vim_buffer;
 
+pub use cursor_autohide::{is_cursor_hidden, is_hover_active, CursorAutohide};
 pub use focus_graph::{BranchGroup, BranchStrategy, Direction, FocusGraph, Neighbors};
+pub use hierarchical_nav::{hierarchical_move, HierarchicalNavResult};
 pub use key_handler::{VimAction, VimKeyHandler};
+pub use modal_text::{check_modal_transition, FocusLevel, ModalTransition};
 pub use navigator::{FocusEvent, FocusWrap, Navigator};
 pub use register::{FocusRegion, FocusRegionResponse};
+pub use scrolloff::{compute_scrolloff_delta, NavDirection, Scrolloff};
 pub use vim_buffer::{
     calculate_motion, clamp_cursor, HistoryEntry, ParsedCommand, TextObject, TextObjectScope,
     TextObjectTarget, UndoHistory, VimBufferState, VimMode, VimMotion, VimOperator, VimParser,

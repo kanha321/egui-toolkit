@@ -122,6 +122,8 @@ pub struct Switch<'a> {
     palette: Option<&'a ThemePalette>,
     id_source: Option<Id>,
     external_state: Option<&'a mut SwitchState>,
+    focused: bool,
+    triggered: bool,
 }
 
 impl<'a> Switch<'a> {
@@ -143,6 +145,8 @@ impl<'a> Switch<'a> {
             palette: None,
             id_source: None,
             external_state: None,
+            focused: false,
+            triggered: false,
         }
     }
 
@@ -239,6 +243,18 @@ impl<'a> Switch<'a> {
         self
     }
 
+    /// Explicitly marks the switch as focused (aligns with keyboard/vim focus).
+    pub fn focused(mut self, focused: bool) -> Self {
+        self.focused = focused;
+        self
+    }
+
+    /// Explicitly triggers a toggle action this frame (e.g. from Enter/Space/F key).
+    pub fn triggered(mut self, triggered: bool) -> Self {
+        self.triggered = triggered;
+        self
+    }
+
     /// Provides an explicit unique ID for state storage.
     pub fn id_source(mut self, id_source: impl std::hash::Hash) -> Self {
         self.id_source = Some(Id::new(id_source));
@@ -267,7 +283,8 @@ impl<'a> Switch<'a> {
 
         let (rect, mut response) = ui.allocate_exact_size(total_size, Sense::click());
 
-        if response.clicked() {
+        let is_clicked = response.clicked() || self.triggered;
+        if is_clicked {
             *self.selected = !*self.selected;
             response.mark_changed();
         }
@@ -295,11 +312,10 @@ impl<'a> Switch<'a> {
                 )
             };
 
-        // Motion physics
+        // Motion physics: hover is driven strictly by focus
         let dt = ui.input(|i| i.stable_dt).min(0.05);
-        let is_hovered = response.hovered();
+        let is_hovered = self.focused;
         let is_on = *self.selected;
-        let is_clicked = response.clicked();
 
         let (thumb_progress, hover_factor) = if self.motion {
             if let Some(state) = self.external_state {

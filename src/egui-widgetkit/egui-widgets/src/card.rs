@@ -334,13 +334,9 @@ impl<'a> Card<'a> {
         });
 
         let response = frame_response.response;
-        let card_rect = response.rect;
 
-        // Now detect hover on the ACTUAL card rect
-        let is_active = self.focused || (self.interactive && ui.input(|i| {
-            i.pointer.hover_pos()
-                .is_some_and(|pos| card_rect.contains(pos))
-        }));
+        // Active state is driven strictly by focus (highlight selection)
+        let is_active = self.focused;
 
         // Update animation state using active hover / focus state (animates both IN and OUT)
         if self.motion {

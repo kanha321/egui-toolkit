@@ -39,12 +39,14 @@
 //! # });
 //! ```
 
+pub mod color_utils;
 pub mod gallery;
 pub mod palette;
 pub mod preview;
 pub mod switcher;
 pub mod token;
 
+pub use color_utils::lerp_color;
 pub use gallery::ThemeGallery;
 pub use palette::{ThemePalette, ThemePreset};
 pub use preview::ThemePreview;

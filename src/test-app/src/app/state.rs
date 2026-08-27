@@ -24,4 +24,5 @@ pub struct TestAppState {
     pub nav_stack_demo: NavStackDemoState,
     pub widgets_demo: WidgetsDemoState,
     pub theme: ThemeState,
+    pub cursor_autohide: egui_vim_nav::CursorAutohide,
 }

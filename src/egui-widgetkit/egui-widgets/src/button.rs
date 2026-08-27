@@ -558,7 +558,7 @@ impl<'a> Button<'a> {
             (false, false)
         };
 
-        let is_hovered = is_focused || response.hovered();
+        let is_hovered = is_focused;
         let is_pressed = response.is_pointer_button_down_on() || is_key_down;
         let is_clicked = response.clicked() || is_key_released || self.triggered;
 
