@@ -1,6 +1,6 @@
 //! Spring-animated numeric slider controls.
 //!
-//! Provides [`Slider`] with spring-scaling knob animations on hover/drag, active track highlights,
+//! Provides [`Slider`] with spring-scaling knob animations on focus/drag, active track highlights,
 //! centered inline geometry, prominent monospace value chips, and inline Vim-enabled direct numeric editing.
 //!
 //! # State Ownership
@@ -50,7 +50,7 @@ pub struct SliderState {
     pub vim_buffer: VimBufferState,
 }
 
-/// Fixed internal knob hover/scale spring — fast pop, not user-facing.
+/// Fixed internal knob focus/scale spring — fast pop, not user-facing.
 const KNOB_SCALE_PARAMS: SpringParams = SpringParams { angular_frequency: 28.0, damping_ratio: 0.50 };
 
 impl Default for SliderState {
@@ -74,7 +74,7 @@ impl SliderState {
         &mut self,
         dt: f32,
         target_normalized: f32,
-        is_hovered: bool,
+        is_focused: bool,
         is_dragged: bool,
         is_clicked: bool,
         pos_params: SpringParams,
@@ -104,11 +104,11 @@ impl SliderState {
             }
             self.position_spring.set_target(target_normalized);
             self.knob_scale_spring.velocity = 12.0;
-            self.knob_scale_spring.set_target(if is_hovered { 1.0 } else { 0.0 });
+            self.knob_scale_spring.set_target(if is_focused { 1.0 } else { 0.0 });
         } else {
             // Smoothly glide towards target if value changed
             self.position_spring.set_target(target_normalized);
-            self.knob_scale_spring.set_target(if is_hovered { 1.0 } else { 0.0 });
+            self.knob_scale_spring.set_target(if is_focused { 1.0 } else { 0.0 });
         }
 
         self.position_spring.update(dt);
@@ -302,7 +302,7 @@ impl<'a, T: Numeric> Slider<'a, T> {
         self
     }
 
-    /// Sets the knob scale expansion multiplier on hover/drag (default `0.25`).
+    /// Sets the knob scale expansion multiplier on focus/drag (default `0.25`).
     pub fn knob_scale_mult(mut self, mult: f32) -> Self {
         self.knob_scale_mult = mult;
         self

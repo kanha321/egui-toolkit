@@ -112,14 +112,16 @@ impl From<SwitchResponse> for egui::Response {
 pub struct SwitchState {
     /// Spring driving thumb horizontal translation ($0.0 \to 1.0$).
     pub thumb_spring: Spring,
-    /// Spring driving track hover/focus highlight ($0.0 \to 1.0$).
-    pub hover_spring: Spring,
+    /// Spring driving track highlight/luminance ($0.0 \to 1.0$).
+    pub highlight_spring: Spring,
+    /// Spring driving track focus/highlight ($0.0 \to 1.0$).
+    pub focus_spring: Spring,
     /// Critically damped spring driving smooth track background crossfade ($0.0 \to 1.0$).
     pub color_spring: Spring,
     /// Spring driving press compression and pop rebound ($0.0 \to 1.0$).
     pub press_spring: Spring,
     /// Spring driving instantaneous organic expand-and-shrink focus bounce ($0.0 \to 0.0$).
-    pub focus_spring: Spring,
+    pub focus_bounce_spring: Spring,
     /// Tracks previous frame's focus state to detect focus entrance.
     pub was_focused: bool,
 }
@@ -128,10 +130,11 @@ impl Default for SwitchState {
     fn default() -> Self {
         Self {
             thumb_spring: Spring::new(0.0, SpringParams::new(26.0, 0.46)),
-            hover_spring: Spring::new(0.0, SpringParams::new(18.0, 0.48)),
+            highlight_spring: Spring::new(0.0, SpringParams::new(18.0, 0.48)),
+            focus_spring: Spring::new(0.0, SpringParams::new(18.0, 0.48)),
             color_spring: Spring::new(0.0, SpringParams::new(14.0, 1.0)),
             press_spring: Spring::new(0.0, SpringParams::new(14.0, 0.42)),
-            focus_spring: Spring::new(0.0, SpringParams::new(18.0, 0.30)),
+            focus_bounce_spring: Spring::new(0.0, SpringParams::new(18.0, 0.30)),
             was_focused: false,
         }
     }
@@ -143,10 +146,11 @@ impl SwitchState {
         let initial_val = if is_on { 1.0 } else { 0.0 };
         Self {
             thumb_spring: Spring::new(initial_val, SpringParams::new(26.0, 0.46)),
-            hover_spring: Spring::new(0.0, SpringParams::new(18.0, 0.48)),
+            highlight_spring: Spring::new(0.0, SpringParams::new(18.0, 0.48)),
+            focus_spring: Spring::new(0.0, SpringParams::new(18.0, 0.48)),
             color_spring: Spring::new(initial_val, SpringParams::new(14.0, 1.0)),
             press_spring: Spring::new(0.0, SpringParams::new(14.0, 0.42)),
-            focus_spring: Spring::new(0.0, SpringParams::new(18.0, 0.30)),
+            focus_bounce_spring: Spring::new(0.0, SpringParams::new(18.0, 0.30)),
             was_focused: false,
         }
     }
@@ -181,7 +185,7 @@ impl SwitchState {
         }
         self.was_focused = is_focused;
 
-        self.hover_spring.set_target(if is_focused { 1.0 } else { 0.0 });
+        self.highlight_spring.set_target(if is_focused { 1.0 } else { 0.0 });
         self.color_spring.set_target(if is_on { 1.0 } else { 0.0 });
 
         if is_pressed {
@@ -194,7 +198,7 @@ impl SwitchState {
         }
 
         self.thumb_spring.update(dt);
-        self.hover_spring.update(dt);
+        self.highlight_spring.update(dt);
         self.color_spring.update(dt);
         self.press_spring.update(dt);
         self.focus_spring.update(dt);
@@ -207,7 +211,7 @@ impl SwitchState {
     /// Returns `true` if all motion springs have reached target equilibrium.
     pub fn is_settled(&self) -> bool {
         self.thumb_spring.is_settled()
-            && self.hover_spring.is_settled()
+            && self.highlight_spring.is_settled()
             && self.color_spring.is_settled()
             && self.press_spring.is_settled()
             && self.focus_spring.is_settled()
@@ -461,16 +465,16 @@ impl<'a> Switch<'a> {
                 )
             };
 
-        // Motion physics: hover is driven strictly by focus
+        // Motion physics: highlighting is driven strictly by focus
         let dt = ui.input(|i| i.stable_dt).min(0.05);
         let is_on = *self.selected;
 
-        let (thumb_progress, hover_factor, color_progress, press_factor, focus_bounce) = if self.motion {
+        let (thumb_progress, highlight_factor, color_progress, press_factor, focus_bounce) = if self.motion {
             if let Some(state) = self.external_state {
                 state.update(dt, is_on, is_focused, is_pressed, is_clicked, ui.ctx());
                 (
                     state.thumb_spring.value(),
-                    state.hover_spring.value(),
+                    state.highlight_spring.value(),
                     state.color_spring.value(),
                     state.press_spring.value(),
                     state.focus_spring.value(),
@@ -490,7 +494,7 @@ impl<'a> Switch<'a> {
                 state.update(dt, is_on, is_focused, is_pressed, is_clicked, ui.ctx());
                 let values = (
                     state.thumb_spring.value(),
-                    state.hover_spring.value(),
+                    state.highlight_spring.value(),
                     state.color_spring.value(),
                     state.press_spring.value(),
                     state.focus_spring.value(),
@@ -525,8 +529,8 @@ impl<'a> Switch<'a> {
 
             // Interpolate track fill smoothly via dedicated color crossfade
             let base_track_fill = lerp_color(track_off, track_on, color_progress.clamp(0.0, 1.0));
-            let final_track_fill = if hover_factor > 0.01 {
-                base_track_fill.linear_multiply(1.0 + hover_factor.clamp(0.0, 1.0) * 0.10)
+            let final_track_fill = if highlight_factor > 0.01 {
+                base_track_fill.linear_multiply(1.0 + highlight_factor.clamp(0.0, 1.0) * 0.10)
             } else {
                 base_track_fill
             };
@@ -569,9 +573,9 @@ impl<'a> Switch<'a> {
                     rect.left() + track_size.x + 8.0,
                     rect.center().y - lg.size().y * 0.5,
                 );
-                let final_label_color = if hover_factor > 0.01 {
+                let final_label_color = if highlight_factor > 0.01 {
                     if let Some(p) = self.palette {
-                        lerp_color(label_color, p.text, hover_factor.clamp(0.0, 1.0))
+                        lerp_color(label_color, p.text, highlight_factor.clamp(0.0, 1.0))
                     } else {
                         label_color
                     }

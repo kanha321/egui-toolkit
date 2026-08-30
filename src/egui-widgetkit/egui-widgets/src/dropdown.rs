@@ -2,7 +2,7 @@
 //!
 //! Provides [`Dropdown`] with in-place height unrolling, continuous text trajectory morphing,
 //! two-tier simultaneous physics highlights (saved selection + sliding focus pill), full 4-state
-//! micro-interactions, zero raw mouse hover dependencies, and Vim keyboard navigation.
+//! micro-interactions, zero raw mouse hover â€” all effects are focus-driven, and Vim keyboard navigation.
 //!
 //! # State Ownership
 //!
@@ -131,7 +131,7 @@ pub struct DropdownItemContext<'a, T> {
     pub index: usize,
     /// Whether this option is currently selected.
     pub is_selected: bool,
-    /// Whether this option is currently highlighted via hover or keyboard navigation.
+    /// Whether this option is currently highlighted via focus or keyboard navigation.
     pub is_highlighted: bool,
     /// Whether this option is disabled.
     pub is_disabled: bool,
@@ -272,10 +272,10 @@ impl<T> std::ops::DerefMut for DropdownResponse<T> {
 pub struct DropdownState {
     /// Spring driving header press compression and rebound pop ($0.0 \to 1.0 \to 0.0$).
     pub press_spring: Spring,
-    /// Spring driving smooth header hover glow/luminance transition ($0.0 \to 1.0$).
-    pub hover_spring: Spring,
-    /// Spring driving instantaneous organic expand-and-shrink hover/focus bounce ($0.0 \to 0.0$).
-    pub hover_bounce_spring: Spring,
+    /// Spring driving smooth header focus glow/luminance transition ($0.0 \to 1.0$).
+    pub focus_spring: Spring,
+    /// Spring driving instantaneous organic expand-and-shrink focus bounce ($0.0 \to 0.0$).
+    pub focus_bounce_spring: Spring,
     /// Spring driving in-place container height expansion ($0.0 \leftrightarrow 1.0$).
     pub open_spring: Spring,
     /// Spring driving chevron arrow rotation ($0.0 \leftrightarrow 1.0$).
@@ -292,8 +292,8 @@ pub struct DropdownState {
     pub is_open: bool,
     /// Currently keyboard/mouse focused item index in the expanded menu.
     pub highlighted_index: Option<usize>,
-    /// Tracks previous frame's hover/focus state.
-    pub was_hovered: bool,
+    /// Tracks previous frame's focus state.
+    pub was_focused: bool,
     /// Tracks previous frame's open state.
     pub was_open: bool,
     /// Whether the sliding focus highlight spring has been initialized.
@@ -309,15 +309,15 @@ pub struct DropdownState {
     /// Whether the dropdown needs to be auto-scrolled into view upon expanding.
     pub needs_expand_scroll: bool,
     /// Whether the dropdown was focused on the previous frame.
-    pub was_focused: bool,
+    pub was_focused_externally: bool,
 }
 
 impl Default for DropdownState {
     fn default() -> Self {
         Self {
             press_spring: Spring::new(0.0, SpringParams::new(18.0, 0.48)),
-            hover_spring: Spring::new(0.0, SpringParams::new(22.0, 0.60)),
-            hover_bounce_spring: Spring::new(0.0, SpringParams::new(20.0, 0.50)),
+            focus_spring: Spring::new(0.0, SpringParams::new(22.0, 0.60)),
+            focus_bounce_spring: Spring::new(0.0, SpringParams::new(20.0, 0.50)),
             open_spring: Spring::new(0.0, SpringParams::new(28.0, 0.75)),
             chevron_spring: Spring::new(0.0, SpringParams::new(24.0, 0.75)),
             focus_y_spring: Spring::new(0.0, SpringParams::new(32.0, 0.85)),
@@ -327,14 +327,14 @@ impl Default for DropdownState {
             scroll_offset_spring: Spring::new(0.0, SpringParams::new(28.0, 0.75)),
             is_open: false,
             highlighted_index: None,
-            was_hovered: false,
+            was_focused: false,
             was_open: false,
             focus_initialized: false,
             saved_initialized: false,
             scroll_initialized: false,
             last_rect: None,
             needs_expand_scroll: false,
-            was_focused: false,
+            was_focused_externally: false,
         }
     }
 }
@@ -392,11 +392,11 @@ impl DropdownState {
         self.press_spring.set_target(0.0);
     }
 
-    /// Triggers an instantaneous size bounce impulse on hover/focus arrival.
-    pub fn trigger_hover_bounce(&mut self) {
-        self.hover_bounce_spring.current = 0.0;
-        self.hover_bounce_spring.velocity = 20.0;
-        self.hover_bounce_spring.set_target(0.0);
+    /// Triggers an instantaneous size bounce impulse on focus arrival.
+    pub fn trigger_focus_bounce(&mut self) {
+        self.focus_bounce_spring.current = 0.0;
+        self.focus_bounce_spring.velocity = 20.0;
+        self.focus_bounce_spring.set_target(0.0);
     }
 
     /// Toggles the open/closed expanded state of the dropdown menu.
@@ -432,17 +432,17 @@ impl DropdownState {
     pub fn update(
         &mut self,
         dt: f32,
-        is_hovered: bool,
+        is_highlighted: bool,
         is_pressed: bool,
         clicked: bool,
         ctx: &egui::Context,
     ) {
-        if is_hovered && !self.was_hovered {
-            self.trigger_hover_bounce();
+        if is_highlighted && !self.was_focused {
+            self.trigger_focus_bounce();
         }
-        self.was_hovered = is_hovered;
+        self.was_focused = is_highlighted;
 
-        self.hover_spring.set_target(if is_hovered { 1.0 } else { 0.0 });
+        self.focus_spring.set_target(if is_highlighted { 1.0 } else { 0.0 });
 
         if is_pressed {
             self.press_spring.set_target(1.0);
@@ -455,8 +455,8 @@ impl DropdownState {
         self.open_spring.set_target(if self.is_open { 1.0 } else { 0.0 });
         self.chevron_spring.set_target(if self.is_open { 1.0 } else { 0.0 });
 
-        self.hover_spring.update(dt);
-        self.hover_bounce_spring.update(dt);
+        self.focus_spring.update(dt);
+        self.focus_bounce_spring.update(dt);
         self.press_spring.update(dt);
         self.open_spring.update(dt);
         self.chevron_spring.update(dt);
@@ -473,8 +473,8 @@ impl DropdownState {
 
     /// Returns `true` if all motion springs have settled within tolerance.
     pub fn is_settled(&self) -> bool {
-        self.hover_spring.is_settled()
-            && self.hover_bounce_spring.is_settled()
+        self.focus_spring.is_settled()
+            && self.focus_bounce_spring.is_settled()
             && self.press_spring.is_settled()
             && self.open_spring.is_settled()
             && self.chevron_spring.is_settled()
@@ -645,7 +645,7 @@ impl<'a, T: Clone + PartialEq> Dropdown<'a, T> {
         self
     }
 
-    /// Sets custom spring physics parameters for press/hover animations.
+    /// Sets custom spring physics parameters for press/focus animations.
     pub fn spring_params(mut self, params: SpringParams) -> Self {
         self.spring_params = params;
         self
@@ -937,9 +937,9 @@ impl<'a, T: Clone + PartialEq> Dropdown<'a, T> {
 
         let rounding = self.rounding.unwrap_or(Rounding::same(4.0));
 
-        // Focus vs Hover Paradigm: Respect cursor autohide
-        let is_hovered = (response.hovered() && crate::is_hover_active(ui.ctx())) || self.focused;
-        let is_focused = self.focused || response.has_focus() || is_hovered;
+        // Focus paradigm: Respect cursor autohide
+        let is_highlighted = (response.hovered() && crate::is_hover_active(ui.ctx())) || self.focused;
+        let is_focused = self.focused || response.has_focus() || is_highlighted;
 
         let pointer_pos = ui.input(|i| i.pointer.hover_pos().or(i.pointer.latest_pos()));
         let pointer_clicked = ui.input(|i| i.pointer.primary_clicked());
@@ -1145,18 +1145,18 @@ impl<'a, T: Clone + PartialEq> Dropdown<'a, T> {
         };
 
         // Motion physics updates
-        let (hover_factor, hover_bounce, press_factor, _chevron_factor) = if self.motion {
+        let (focus_factor, focus_bounce, press_factor, _chevron_factor) = if self.motion {
             state.press_spring.params = self.spring_params;
-            state.update(dt, is_hovered, header_pressed, header_clicked, ui.ctx());
+            state.update(dt, is_highlighted, header_pressed, header_clicked, ui.ctx());
             (
-                state.hover_spring.value(),
-                state.hover_bounce_spring.value(),
+                state.focus_spring.value(),
+                state.focus_bounce_spring.value(),
                 state.press_spring.value(),
                 state.chevron_spring.value(),
             )
         } else {
             (
-                if is_hovered { 1.0 } else { 0.0 },
+                if is_highlighted { 1.0 } else { 0.0 },
                 0.0,
                 if header_pressed { 1.0 } else { 0.0 },
                 if state.is_open { 1.0 } else { 0.0 },
@@ -1167,7 +1167,7 @@ impl<'a, T: Clone + PartialEq> Dropdown<'a, T> {
         // For mouse interaction, offsets/shifts are disabled so the widget doesn't move under the pointer.
         let is_pointer_driven = response.hovered() || response.clicked() || response.is_pointer_button_down_on();
         let scale = if !state.is_open && self.focused && !is_pointer_driven {
-            (1.0 + (hover_bounce * 0.045) - (press_factor * 0.06)).clamp(0.90, 1.10)
+            (1.0 + (focus_bounce * 0.045) - (press_factor * 0.06)).clamp(0.90, 1.10)
         } else {
             1.0
         };
@@ -1184,7 +1184,7 @@ impl<'a, T: Clone + PartialEq> Dropdown<'a, T> {
             } else {
                 Stroke::new(1.0, ui.visuals().widgets.inactive.bg_stroke.color)
             }
-        } else if hover_factor > 0.05 {
+        } else if focus_factor > 0.05 {
             if let Some(p) = self.palette {
                 Stroke::new(1.0, p.surface2)
             } else {

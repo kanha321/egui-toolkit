@@ -1,11 +1,11 @@
 //! Theme-aware surface containers and interactive cards.
 //!
-//! Provides [`Card`] and [`Surface`] with optional spring hover lift, title/subtitle slots,
+//! Provides [`Card`] and [`Surface`] with optional spring focus lift, title/subtitle slots,
 //! customizable padding, and palette token styling.
 //!
 //! # State Ownership
 //!
-//! Interactive hover lift is stored in ID temporary storage or an app-owned [`CardState`] (`CODING_RULES §2`).
+//! Interactive focus lift is stored in ID temporary storage or an app-owned [`CardState`] (`CODING_RULES §2`).
 
 use egui::{
     vec2, Color32, Id, Response, Rounding, Stroke, TextStyle, Ui,
@@ -14,11 +14,11 @@ use egui::{
 use egui_themes::ThemePalette;
 use spring_core::{Spring, SpringParams};
 
-/// Persistent animation state for container cards with hover and press elevation springs.
+/// Persistent animation state for container cards with focus and press elevation springs.
 #[derive(Clone, Debug)]
 pub struct CardState {
-    /// Spring driving hover elevation lift ($0.0 \to 1.0$).
-    pub hover_spring: Spring,
+    /// Spring driving focus elevation lift ($0.0 \to 1.0$).
+    pub focus_spring: Spring,
     /// Spring driving press compression and 3D depression ($0.0 \to 1.0$).
     pub press_spring: Spring,
 }
@@ -26,23 +26,23 @@ pub struct CardState {
 impl Default for CardState {
     fn default() -> Self {
         Self {
-            hover_spring: Spring::new(0.0, SpringParams::new(22.0, 0.48)),
+            focus_spring: Spring::new(0.0, SpringParams::new(22.0, 0.48)),
             press_spring: Spring::new(0.0, SpringParams::new(20.0, 0.45)),
         }
     }
 }
 
 impl CardState {
-    /// Updates hover lift and press springs and requests repaint if moving.
+    /// Updates focus lift and press springs and requests repaint if moving.
     pub fn update(
         &mut self,
         dt: f32,
-        is_hovered: bool,
+        is_focused: bool,
         is_pressed: bool,
         clicked: bool,
         ctx: &egui::Context,
     ) {
-        self.hover_spring.set_target(if is_hovered { 1.0 } else { 0.0 });
+        self.focus_spring.set_target(if is_focused { 1.0 } else { 0.0 });
         if is_pressed {
             self.press_spring.set_target(1.0);
         } else if clicked {
@@ -52,7 +52,7 @@ impl CardState {
             self.press_spring.set_target(0.0);
         }
 
-        self.hover_spring.update(dt);
+        self.focus_spring.update(dt);
         self.press_spring.update(dt);
 
         if !self.is_settled() {
@@ -62,11 +62,11 @@ impl CardState {
 
     /// Returns `true` if all motion springs have settled.
     pub fn is_settled(&self) -> bool {
-        self.hover_spring.is_settled() && self.press_spring.is_settled()
+        self.focus_spring.is_settled() && self.press_spring.is_settled()
     }
 }
 
-/// A theme-aware container card with optional spring hover elevation.
+/// A theme-aware container card with optional spring focus elevation.
 ///
 /// # Example
 /// ```no_run
@@ -88,9 +88,9 @@ pub struct Card<'a> {
     title_color: Option<Color32>,
     subtitle_color: Option<Color32>,
     fill: Option<Color32>,
-    hover_fill: Option<Color32>,
+    highlight_fill: Option<Color32>,
     stroke: Option<Stroke>,
-    hover_stroke: Option<Stroke>,
+    highlight_stroke: Option<Stroke>,
     rounding: Option<Rounding>,
     padding: Vec2,
     min_size: Vec2,
@@ -98,7 +98,7 @@ pub struct Card<'a> {
     focused: bool,
     triggered: bool,
     pressed: bool,
-    hover_lift: f32,
+    focus_lift: f32,
     spring_params: SpringParams,
     motion: bool,
     palette: Option<&'a ThemePalette>,
@@ -121,13 +121,13 @@ impl<'a> Card<'a> {
             title_color: None,
             subtitle_color: None,
             fill: None,
-            hover_fill: None,
+            highlight_fill: None,
             stroke: None,
-            hover_stroke: None,
+            highlight_stroke: None,
             rounding: None,
             padding: vec2(14.0, 14.0),
             min_size: Vec2::ZERO,
-            hover_lift: 4.0,
+            focus_lift: 4.0,
             interactive: false,
             focused: false,
             triggered: false,
@@ -182,9 +182,9 @@ impl<'a> Card<'a> {
         self
     }
 
-    /// Explicitly overrides card hovered fill.
-    pub fn hover_fill(mut self, fill: Color32) -> Self {
-        self.hover_fill = Some(fill);
+    /// Explicitly overrides card highlighted fill.
+    pub fn highlight_fill(mut self, fill: Color32) -> Self {
+        self.highlight_fill = Some(fill);
         self
     }
 
@@ -194,9 +194,9 @@ impl<'a> Card<'a> {
         self
     }
 
-    /// Explicitly overrides card hovered border stroke.
-    pub fn hover_stroke(mut self, stroke: impl Into<Stroke>) -> Self {
-        self.hover_stroke = Some(stroke.into());
+    /// Explicitly overrides card highlighted border stroke.
+    pub fn highlight_stroke(mut self, stroke: impl Into<Stroke>) -> Self {
+        self.highlight_stroke = Some(stroke.into());
         self
     }
 
@@ -218,7 +218,7 @@ impl<'a> Card<'a> {
         self
     }
 
-    /// Enables or disables interactive hover lift effects.
+    /// Enables or disables interactive focus lift effects.
     pub fn interactive(mut self, interactive: bool) -> Self {
         self.interactive = interactive;
         self
@@ -230,13 +230,13 @@ impl<'a> Card<'a> {
         self
     }
 
-    /// Sets the vertical pixel distance for hover lift (default `3.0pt`).
-    pub fn hover_lift(mut self, lift: f32) -> Self {
-        self.hover_lift = lift;
+    /// Sets the vertical pixel distance for focus lift (default `3.0pt`).
+    pub fn focus_lift(mut self, lift: f32) -> Self {
+        self.focus_lift = lift;
         self
     }
 
-    /// Configures physical spring dynamics parameters for hover/focus elevation.
+    /// Configures physical spring dynamics parameters for focus elevation.
     pub fn spring_params(mut self, params: SpringParams) -> Self {
         self.spring_params = params;
         self
@@ -281,12 +281,12 @@ impl<'a> Card<'a> {
             )
         });
 
-        let (bg_fill, bg_stroke, _hover_stroke, title_col, subtitle_col) =
+        let (bg_fill, bg_stroke, _highlight_stroke, title_col, subtitle_col) =
             if let Some(p) = self.palette {
                 (
                     self.fill.unwrap_or(p.mantle),
                     self.stroke.unwrap_or(Stroke::new(1.0, p.surface0)),
-                    self.hover_stroke.unwrap_or(Stroke::new(1.5, p.accent)),
+                    self.highlight_stroke.unwrap_or(Stroke::new(1.5, p.accent)),
                     self.title_color.unwrap_or(p.text),
                     self.subtitle_color.unwrap_or(p.subtext0),
                 )
@@ -295,7 +295,7 @@ impl<'a> Card<'a> {
                 (
                     self.fill.unwrap_or(v.widgets.noninteractive.bg_fill),
                     self.stroke.unwrap_or(v.widgets.noninteractive.bg_stroke),
-                    self.hover_stroke.unwrap_or(Stroke::new(1.5, v.selection.stroke.color)),
+                    self.highlight_stroke.unwrap_or(Stroke::new(1.5, v.selection.stroke.color)),
                     self.title_color.unwrap_or(v.widgets.noninteractive.fg_stroke.color),
                     self.subtitle_color.unwrap_or(v.widgets.inactive.fg_stroke.color),
                 )
@@ -312,18 +312,18 @@ impl<'a> Card<'a> {
             }
         });
 
-        // Read previous frame's hover/focus animation value for this frame's rendering
+        // Read previous frame's focus animation value for this frame's rendering
         let dt = ui.input(|i| i.stable_dt).min(0.05);
-        let prev_hover_val: f32 = if self.motion {
+        let prev_focus_val: f32 = if self.motion {
             ui.data_mut(|d| {
-                d.get_temp::<f32>(id.with("hover_val")).unwrap_or(0.0)
+                d.get_temp::<f32>(id.with("focus_val")).unwrap_or(0.0)
             })
         } else {
             0.0
         };
 
         let current_stroke = bg_stroke;
-        let t = prev_hover_val.clamp(0.0, 1.0);
+        let t = prev_focus_val.clamp(0.0, 1.0);
         let current_fill = if self.motion && t > 0.001 {
             bg_fill.linear_multiply(1.0 + 0.08 * t)
         } else {
@@ -390,25 +390,25 @@ impl<'a> Card<'a> {
         let is_pressed = self.pressed || response.is_pointer_button_down_on() || is_key_down;
         let is_clicked = response.clicked() || is_key_released || self.triggered;
 
-        // Update animation state using active hover / focus state (animates both IN and OUT)
+        // Update animation state using active focus state (animates both IN and OUT)
         if self.motion {
             if let Some(state) = self.external_state {
                 state.update(dt, is_active, is_pressed, is_clicked, ui.ctx());
-                let val = state.hover_spring.value();
-                ui.data_mut(|d| d.insert_temp(id.with("hover_val"), val));
+                let val = state.focus_spring.value();
+                ui.data_mut(|d| d.insert_temp(id.with("focus_val"), val));
             } else {
                 let mut state: CardState = ui.data_mut(|d| {
                     d.get_temp(id).unwrap_or_else(|| CardState {
-                        hover_spring: Spring::new(0.0, self.spring_params),
+                        focus_spring: Spring::new(0.0, self.spring_params),
                         press_spring: Spring::new(0.0, SpringParams::new(20.0, 0.45)),
                     })
                 });
-                state.hover_spring.params = self.spring_params;
+                state.focus_spring.params = self.spring_params;
                 state.update(dt, is_active, is_pressed, is_clicked, ui.ctx());
-                let val = state.hover_spring.value();
+                let val = state.focus_spring.value();
                 ui.data_mut(|d| {
                     d.insert_temp(id, state);
-                    d.insert_temp(id.with("hover_val"), val);
+                    d.insert_temp(id.with("focus_val"), val);
                 });
             }
         }

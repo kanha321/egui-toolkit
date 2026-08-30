@@ -272,11 +272,11 @@ fn test_button_press_and_pop_springs() {
     let ctx = egui::Context::default();
     assert!(state.is_settled());
 
-    // Frame 1: Hover and Press down (hover bounce triggered)
+    // Frame 1: Focus and Press down (focus bounce triggered)
     state.update(0.016, true, true, false, &ctx);
     assert!(!state.is_settled());
     assert_eq!(state.press_spring.target, 1.0);
-    assert!(state.hover_bounce_spring.velocity > 0.0);
+    assert!(state.focus_bounce_spring.velocity > 0.0);
 
     // Frame 2: Release and click
     state.update(0.016, true, false, true, &ctx);
@@ -296,11 +296,11 @@ fn test_switch_press_and_release_springs() {
     let ctx = egui::Context::default();
     assert!(state.is_settled());
 
-    // Focus entrance sets hover_spring target and triggers focus bounce impulse
+    // Focus entrance sets highlight_spring target and triggers focus bounce impulse
     state.update(0.016, false, true, false, false, &ctx);
     assert!(!state.is_settled());
     assert!(state.focus_spring.velocity > 0.0);
-    assert_eq!(state.hover_spring.target, 1.0);
+    assert_eq!(state.highlight_spring.target, 1.0);
 
     // Press down
     state.update(0.016, false, true, true, false, &ctx);
@@ -571,10 +571,10 @@ fn test_dropdown_4_state_press_and_pop() {
 
     let mut state = DropdownState::default();
 
-    // 1. Hover arrival impulse
-    state.trigger_hover_bounce();
-    assert_eq!(state.hover_bounce_spring.velocity, 20.0);
-    assert!(!state.hover_bounce_spring.is_settled());
+    // 1. Focus arrival impulse
+    state.trigger_focus_bounce();
+    assert_eq!(state.focus_bounce_spring.velocity, 20.0);
+    assert!(!state.focus_bounce_spring.is_settled());
 
     // 2. Click release rebound pop
     state.trigger_click();
@@ -583,10 +583,10 @@ fn test_dropdown_4_state_press_and_pop() {
 
     let dt = 0.016;
     for _ in 0..120 {
-        state.hover_bounce_spring.update(dt);
+        state.focus_bounce_spring.update(dt);
         state.press_spring.update(dt);
     }
-    assert!(state.hover_bounce_spring.is_settled());
+    assert!(state.focus_bounce_spring.is_settled());
     assert!(state.press_spring.is_settled());
 }
 

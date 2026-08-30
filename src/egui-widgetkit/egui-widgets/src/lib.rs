@@ -10,7 +10,7 @@
 //! - **Palette-Driven (Single Source of Truth)**: Every widget automatically derives its fills,
 //!   strokes, text colors, and states from [`ThemePalette`](egui_themes::ThemePalette) or [`egui::Visuals`].
 //! - **Spring Motion Physics**: Interactive micro-interactions (press bounce, elastic thumb travel,
-//!   sliding pills, hover elevation, focus glow rings) are powered by continuous closed-form ODE
+//!   sliding pills, focus elevation, focus glow rings) are powered by continuous closed-form ODE
 //!   physics from [`spring-core`].
 //! - **Complete Customization**: Every visual parameter (colors, strokes, roundings, paddings,
 //!   spring physics parameters, motion toggles) is exposed via fluent builder methods.
@@ -22,13 +22,13 @@
 //!
 //! ## Component Inventory
 //!
-//! - [`Button`], [`ButtonVariant`], [`ButtonSize`], [`ButtonState`]: Animated buttons with press bounce and hover luminance glide.
+//! - [`Button`], [`ButtonVariant`], [`ButtonSize`], [`ButtonState`]: Animated buttons with press bounce and focus luminance glide.
 //! - [`Switch`], [`SwitchSize`], [`SwitchState`]: Fluid spring toggle switches.
 //! - [`SegmentedTabs`], [`TabItem`], [`TabsState`]: Continuous sliding pill tab switcher.
 //! - [`ProgressBar`], [`ProgressVariant`], [`ProgressState`]: Smooth progress meters with physical catchup.
 //! - [`Slider`], [`SliderState`]: Interactive sliders with spring-scaling knob thumbs.
 //! - [`Checkbox`], [`CheckboxState`], [`RadioButton`]: Animated checkmarks and radio dots with overshoot bounce.
-//! - [`Card`], [`CardState`]: Container surfaces with optional spring hover lift.
+//! - [`Card`], [`CardState`]: Container surfaces with optional spring focus lift.
 //! - [`Badge`], [`BadgeVariant`]: Semantic status badges and tag indicators.
 //! - [`TextInput`], [`InputState`]: Text inputs with animated spring focus glow rings.
 //! - [`Dropdown`], [`DropdownOption`], [`DropdownResponse`], [`DropdownState`]: Spring-animated dropdown menus.
@@ -61,7 +61,7 @@ pub use tabs::{SegmentedTabs, TabItem, TabsResponse, TabsState};
 /// Returns whether pointer hover should be rendered visually.
 ///
 /// Returns `false` if cursor autohide has hidden the cursor (e.g. during keyboard navigation),
-/// preventing ghost hover highlights on widgets when scrolling or moving focus.
+/// preventing ghost pointer highlights on widgets when scrolling or moving focus.
 #[inline]
 pub(crate) fn is_hover_active(ctx: &egui::Context) -> bool {
     !ctx.data(|d| d.get_temp::<bool>(egui::Id::new("_egui_cursor_autohide_hidden"))).unwrap_or(false)

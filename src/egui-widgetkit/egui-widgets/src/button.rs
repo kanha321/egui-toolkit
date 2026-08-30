@@ -1,6 +1,6 @@
 //! Spring-animated, theme-aware button controls.
 //!
-//! Provides [`Button`] with spring-driven press feedback, smooth hover
+//! Provides [`Button`] with spring-driven press feedback, smooth focus
 //! luminance morphing, multiple semantic variants, and full developer customization.
 //!
 //! # State Ownership
@@ -23,7 +23,7 @@ pub enum ButtonVariant {
     Primary,
     /// Subtle secondary button using palette surface layers.
     Secondary,
-    /// Borderless ghost button with soft hover background.
+    /// Borderless ghost button with soft highlight background.
     Ghost,
     /// Negative / destructive action button using palette danger.
     Danger,
@@ -128,16 +128,16 @@ impl From<ButtonResponse> for egui::Response {
 pub struct ButtonState {
     /// Spring driving press compression and bounce rebound ($0.0 \to 1.0 \to 0.0$).
     pub press_spring: Spring,
-    /// Spring driving smooth hover glow/luminance transition ($0.0 \to 1.0$).
-    pub hover_spring: Spring,
-    /// Spring driving instantaneous organic expand-and-shrink hover/focus bounce ($0.0 \to 0.0$).
-    pub hover_bounce_spring: Spring,
+    /// Spring driving smooth focus glow/luminance transition ($0.0 \to 1.0$).
+    pub focus_spring: Spring,
+    /// Spring driving instantaneous organic expand-and-shrink focus bounce ($0.0 \to 0.0$).
+    pub focus_bounce_spring: Spring,
     /// Spring driving smooth width size transitions when text/content changes.
     pub width_spring: Spring,
     /// Spring driving smooth height size transitions when content changes.
     pub height_spring: Spring,
-    /// Tracks previous frame's hover/focus state to detect entrance.
-    pub was_hovered: bool,
+    /// Tracks previous frame's focus state to detect entrance.
+    pub was_focused: bool,
     /// Whether size springs have been initialized with the initial content size.
     pub size_initialized: bool,
 }
@@ -146,11 +146,11 @@ impl Default for ButtonState {
     fn default() -> Self {
         Self {
             press_spring: Spring::new(0.0, SpringParams::new(14.0, 0.42)),
-            hover_spring: Spring::new(0.0, SpringParams::new(20.0, 0.55)),
-            hover_bounce_spring: Spring::new(0.0, SpringParams::new(18.0, 0.30)),
+            focus_spring: Spring::new(0.0, SpringParams::new(20.0, 0.55)),
+            focus_bounce_spring: Spring::new(0.0, SpringParams::new(18.0, 0.30)),
             width_spring: Spring::new(0.0, SpringParams::new(26.0, 0.58)),
             height_spring: Spring::new(0.0, SpringParams::new(26.0, 0.58)),
-            was_hovered: false,
+            was_focused: false,
             size_initialized: false,
         }
     }
@@ -168,28 +168,28 @@ impl ButtonState {
         self.press_spring.set_target(0.0);
     }
 
-    /// Triggers an instantaneous size bounce impulse on hover/focus arrival.
-    pub fn trigger_hover_bounce(&mut self) {
-        self.hover_bounce_spring.current = 0.0;
-        self.hover_bounce_spring.velocity = 20.0;
-        self.hover_bounce_spring.set_target(0.0);
+    /// Triggers an instantaneous size bounce impulse on focus arrival.
+    pub fn trigger_focus_bounce(&mut self) {
+        self.focus_bounce_spring.current = 0.0;
+        self.focus_bounce_spring.velocity = 20.0;
+        self.focus_bounce_spring.set_target(0.0);
     }
 
     /// Updates the button's internal springs and requests repaint if still moving.
     pub fn update(
         &mut self,
         dt: f32,
-        is_hovered: bool,
+        is_focused: bool,
         is_pressed: bool,
         clicked: bool,
         ctx: &egui::Context,
     ) {
-        if is_hovered && !self.was_hovered {
-            self.trigger_hover_bounce();
+        if is_focused && !self.was_focused {
+            self.trigger_focus_bounce();
         }
-        self.was_hovered = is_hovered;
+        self.was_focused = is_focused;
 
-        self.hover_spring.set_target(if is_hovered { 1.0 } else { 0.0 });
+        self.focus_spring.set_target(if is_focused { 1.0 } else { 0.0 });
 
         if is_pressed {
             self.press_spring.set_target(1.0);
@@ -199,8 +199,8 @@ impl ButtonState {
             self.press_spring.set_target(0.0);
         }
 
-        self.hover_spring.update(dt);
-        self.hover_bounce_spring.update(dt);
+        self.focus_spring.update(dt);
+        self.focus_bounce_spring.update(dt);
         self.press_spring.update(dt);
 
         if !self.is_settled() {
@@ -210,8 +210,8 @@ impl ButtonState {
 
     /// Returns `true` if all motion springs have settled within tolerance.
     pub fn is_settled(&self) -> bool {
-        self.hover_spring.is_settled()
-            && self.hover_bounce_spring.is_settled()
+        self.focus_spring.is_settled()
+            && self.focus_bounce_spring.is_settled()
             && self.press_spring.is_settled()
             && self.width_spring.is_settled()
             && self.height_spring.is_settled()
@@ -238,10 +238,10 @@ pub struct Button<'a> {
     variant: ButtonVariant,
     size: ButtonSize,
     fill: Option<Color32>,
-    hover_fill: Option<Color32>,
+    highlight_fill: Option<Color32>,
     active_fill: Option<Color32>,
     stroke: Option<Stroke>,
-    hover_stroke: Option<Stroke>,
+    highlight_stroke: Option<Stroke>,
     active_stroke: Option<Stroke>,
     text_color: Option<Color32>,
     rounding: Option<Rounding>,
@@ -268,10 +268,10 @@ impl<'a> Button<'a> {
             variant: ButtonVariant::Primary,
             size: ButtonSize::Medium,
             fill: None,
-            hover_fill: None,
+            highlight_fill: None,
             active_fill: None,
             stroke: None,
-            hover_stroke: None,
+            highlight_stroke: None,
             active_stroke: None,
             text_color: None,
             rounding: None,
@@ -392,9 +392,9 @@ impl<'a> Button<'a> {
         self
     }
 
-    /// Explicitly overrides the hovered background fill color.
-    pub fn hover_fill(mut self, fill: Color32) -> Self {
-        self.hover_fill = Some(fill);
+    /// Explicitly overrides the highlighted background fill color.
+    pub fn highlight_fill(mut self, fill: Color32) -> Self {
+        self.highlight_fill = Some(fill);
         self
     }
 
@@ -410,9 +410,9 @@ impl<'a> Button<'a> {
         self
     }
 
-    /// Explicitly overrides the hovered border stroke.
-    pub fn hover_stroke(mut self, stroke: impl Into<Stroke>) -> Self {
-        self.hover_stroke = Some(stroke.into());
+    /// Explicitly overrides the highlighted border stroke.
+    pub fn highlight_stroke(mut self, stroke: impl Into<Stroke>) -> Self {
+        self.highlight_stroke = Some(stroke.into());
         self
     }
 
@@ -446,7 +446,7 @@ impl<'a> Button<'a> {
         self
     }
 
-    /// Sets custom spring physics parameters for press/hover animations.
+    /// Sets custom spring physics parameters for press/focus animations.
     pub fn spring_params(mut self, params: SpringParams) -> Self {
         self.spring_params = params;
         self
@@ -576,54 +576,54 @@ impl<'a> Button<'a> {
         let (rect, response) = ui.allocate_exact_size(allocated_size, Sense::click());
 
         // Resolve colors from ThemePalette or ui.visuals()
-        let (base_fill, hover_fill, active_fill, base_stroke, text_color) =
+        let (base_fill, highlight_fill, active_fill, base_stroke, text_color) =
             if let Some(p) = self.palette {
                 match self.variant {
                     ButtonVariant::Primary => (
                         self.fill.unwrap_or(p.accent),
-                        self.hover_fill.unwrap_or(p.accent.linear_multiply(1.15)),
+                        self.highlight_fill.unwrap_or(p.accent.linear_multiply(1.15)),
                         self.active_fill.unwrap_or(p.accent.linear_multiply(0.85)),
                         self.stroke.unwrap_or(Stroke::NONE),
                         self.text_color.unwrap_or(p.on_accent),
                     ),
                     ButtonVariant::Secondary => (
                         self.fill.unwrap_or(p.surface0),
-                        self.hover_fill.unwrap_or(p.surface1),
+                        self.highlight_fill.unwrap_or(p.surface1),
                         self.active_fill.unwrap_or(p.surface2),
                         self.stroke.unwrap_or(Stroke::new(1.0, p.surface1)),
                         self.text_color.unwrap_or(p.text),
                     ),
                     ButtonVariant::Ghost => (
                         self.fill.unwrap_or(Color32::TRANSPARENT),
-                        self.hover_fill.unwrap_or(p.surface0),
+                        self.highlight_fill.unwrap_or(p.surface0),
                         self.active_fill.unwrap_or(p.surface1),
                         self.stroke.unwrap_or(Stroke::NONE),
                         self.text_color.unwrap_or(p.text),
                     ),
                     ButtonVariant::Danger => (
                         self.fill.unwrap_or(p.danger),
-                        self.hover_fill.unwrap_or(p.danger.linear_multiply(1.15)),
+                        self.highlight_fill.unwrap_or(p.danger.linear_multiply(1.15)),
                         self.active_fill.unwrap_or(p.danger.linear_multiply(0.85)),
                         self.stroke.unwrap_or(Stroke::NONE),
                         self.text_color.unwrap_or(p.on_danger),
                     ),
                     ButtonVariant::Outline => (
                         self.fill.unwrap_or(Color32::TRANSPARENT),
-                        self.hover_fill.unwrap_or(p.accent.linear_multiply(0.15)),
+                        self.highlight_fill.unwrap_or(p.accent.linear_multiply(0.15)),
                         self.active_fill.unwrap_or(p.accent.linear_multiply(0.25)),
                         self.stroke.unwrap_or(Stroke::new(1.0, p.accent)),
                         self.text_color.unwrap_or(p.accent),
                     ),
                     ButtonVariant::Success => (
                         self.fill.unwrap_or(p.success),
-                        self.hover_fill.unwrap_or(p.success.linear_multiply(1.15)),
+                        self.highlight_fill.unwrap_or(p.success.linear_multiply(1.15)),
                         self.active_fill.unwrap_or(p.success.linear_multiply(0.85)),
                         self.stroke.unwrap_or(Stroke::NONE),
                         self.text_color.unwrap_or(p.on_success),
                     ),
                     ButtonVariant::Warning => (
                         self.fill.unwrap_or(p.warning),
-                        self.hover_fill.unwrap_or(p.warning.linear_multiply(1.15)),
+                        self.highlight_fill.unwrap_or(p.warning.linear_multiply(1.15)),
                         self.active_fill.unwrap_or(p.warning.linear_multiply(0.85)),
                         self.stroke.unwrap_or(Stroke::NONE),
                         self.text_color.unwrap_or(p.on_warning),
@@ -634,49 +634,49 @@ impl<'a> Button<'a> {
                 match self.variant {
                     ButtonVariant::Primary => (
                         self.fill.unwrap_or(v.selection.bg_fill),
-                        self.hover_fill.unwrap_or(v.widgets.hovered.bg_fill),
+                        self.highlight_fill.unwrap_or(v.widgets.hovered.bg_fill),
                         self.active_fill.unwrap_or(v.widgets.active.bg_fill),
                         self.stroke.unwrap_or(Stroke::NONE),
                         self.text_color.unwrap_or(v.selection.stroke.color),
                     ),
                     ButtonVariant::Secondary => (
                         self.fill.unwrap_or(v.widgets.inactive.bg_fill),
-                        self.hover_fill.unwrap_or(v.widgets.hovered.bg_fill),
+                        self.highlight_fill.unwrap_or(v.widgets.hovered.bg_fill),
                         self.active_fill.unwrap_or(v.widgets.active.bg_fill),
                         self.stroke.unwrap_or(v.widgets.inactive.bg_stroke),
                         self.text_color.unwrap_or(v.widgets.inactive.fg_stroke.color),
                     ),
                     ButtonVariant::Ghost => (
                         self.fill.unwrap_or(Color32::TRANSPARENT),
-                        self.hover_fill.unwrap_or(v.widgets.hovered.bg_fill.linear_multiply(0.5)),
+                        self.highlight_fill.unwrap_or(v.widgets.hovered.bg_fill.linear_multiply(0.5)),
                         self.active_fill.unwrap_or(v.widgets.active.bg_fill.linear_multiply(0.5)),
                         self.stroke.unwrap_or(Stroke::NONE),
                         self.text_color.unwrap_or(v.widgets.inactive.fg_stroke.color),
                     ),
                     ButtonVariant::Danger => (
                         self.fill.unwrap_or(v.error_fg_color),
-                        self.hover_fill.unwrap_or(v.error_fg_color.linear_multiply(1.15)),
+                        self.highlight_fill.unwrap_or(v.error_fg_color.linear_multiply(1.15)),
                         self.active_fill.unwrap_or(v.error_fg_color.linear_multiply(0.85)),
                         self.stroke.unwrap_or(Stroke::NONE),
                         self.text_color.unwrap_or(Color32::WHITE),
                     ),
                     ButtonVariant::Outline => (
                         self.fill.unwrap_or(Color32::TRANSPARENT),
-                        self.hover_fill.unwrap_or(v.widgets.hovered.bg_fill.linear_multiply(0.3)),
+                        self.highlight_fill.unwrap_or(v.widgets.hovered.bg_fill.linear_multiply(0.3)),
                         self.active_fill.unwrap_or(v.widgets.active.bg_fill.linear_multiply(0.3)),
                         self.stroke.unwrap_or(Stroke::new(1.0, v.selection.stroke.color)),
                         self.text_color.unwrap_or(v.selection.stroke.color),
                     ),
                     ButtonVariant::Success => (
                         self.fill.unwrap_or(Color32::from_rgb(40, 167, 69)),
-                        self.hover_fill.unwrap_or(Color32::from_rgb(50, 190, 80)),
+                        self.highlight_fill.unwrap_or(Color32::from_rgb(50, 190, 80)),
                         self.active_fill.unwrap_or(Color32::from_rgb(30, 140, 55)),
                         self.stroke.unwrap_or(Stroke::NONE),
                         self.text_color.unwrap_or(Color32::WHITE),
                     ),
                     ButtonVariant::Warning => (
                         self.fill.unwrap_or(v.warn_fg_color),
-                        self.hover_fill.unwrap_or(v.warn_fg_color.linear_multiply(1.15)),
+                        self.highlight_fill.unwrap_or(v.warn_fg_color.linear_multiply(1.15)),
                         self.active_fill.unwrap_or(v.warn_fg_color.linear_multiply(0.85)),
                         self.stroke.unwrap_or(Stroke::NONE),
                         self.text_color.unwrap_or(Color32::BLACK),
@@ -710,12 +710,12 @@ impl<'a> Button<'a> {
             || (is_focused && is_key_released)
             || response.clicked();
 
-        let (hover_factor, hover_bounce, press_factor) = if self.motion {
+        let (focus_factor, focus_bounce, press_factor) = if self.motion {
             state.press_spring.params = self.spring_params;
             state.update(dt, is_focused, is_pressed, is_clicked, ui.ctx());
             (
-                state.hover_spring.value(),
-                state.hover_bounce_spring.value(),
+                state.focus_spring.value(),
+                state.focus_bounce_spring.value(),
                 state.press_spring.value(),
             )
         } else {
@@ -730,8 +730,8 @@ impl<'a> Button<'a> {
             ui.data_mut(|d| d.insert_temp(id, st));
         }
 
-        // Scale geometry with bouncy hover pulse, press compression, 3D vertical sink, & release pop overshoot
-        let scale = (1.0 + (hover_bounce * 0.12) - (press_factor * 0.14)).max(0.65);
+        // Scale geometry with bouncy focus pulse, press compression, 3D vertical sink, & release pop overshoot
+        let scale = (1.0 + (focus_bounce * 0.12) - (press_factor * 0.14)).max(0.65);
         let y_offset = press_factor * 4.0;
         let center = rect.center() + vec2(0.0, y_offset);
         let animated_rect = Rect::from_center_size(
@@ -742,17 +742,17 @@ impl<'a> Button<'a> {
 
         // Interpolate fill and stroke colors
         let current_fill = if press_factor > 0.05 {
-            lerp_color(hover_fill, active_fill, press_factor.clamp(0.0, 1.0))
+            lerp_color(highlight_fill, active_fill, press_factor.clamp(0.0, 1.0))
         } else {
-            lerp_color(base_fill, hover_fill, hover_factor.clamp(0.0, 1.0))
+            lerp_color(base_fill, highlight_fill, focus_factor.clamp(0.0, 1.0))
         };
 
         let current_stroke = if press_factor > 0.05 {
             self.active_stroke.unwrap_or_else(|| {
                 Stroke::new(base_stroke.width + 0.5, base_stroke.color)
             })
-        } else if hover_factor > 0.05 {
-            self.hover_stroke.unwrap_or(base_stroke)
+        } else if focus_factor > 0.05 {
+            self.highlight_stroke.unwrap_or(base_stroke)
         } else {
             base_stroke
         };
