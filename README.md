@@ -5,282 +5,263 @@
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-green.svg?style=flat-square)](Cargo.toml)
 [![Tests](https://img.shields.io/badge/tests-186%20passing-brightgreen.svg?style=flat-square)](Cargo.toml)
 
-A comprehensive, modular suite of high-contrast, physics-driven, keyboard-navigable UI crates for **[egui](https://github.com/emilk/egui)**.
+**`egui-widgetkit` is a modular, high-contrast, tactile UI engine and component suite for [egui](https://github.com/emilk/egui).**
 
-`egui-widgetkit` combines **analytical ODE spring physics**, **token-based semantic theming**, **Vim-style modal keyboard navigation**, **responsive nested splits**, and a rich library of **animated interactive widgets** into a decoupled single-repository workspace.
-
----
-
-## Workspace Crates
-
-The library lives under `src/egui-widgetkit/` and is divided into 7 focused crates:
-
-| Crate | Path | Description | Docs |
-| :--- | :--- | :--- | :--- |
-| **`spring-core`** | [`src/.../spring-core`](src/egui-widgetkit/spring-core) | Pure mathematical analytical spring physics solver (closed-form ODE, **zero `egui` dependency**). | [Guide](docs/usage/spring-core.md) |
-| **`egui-themes`** | [`src/.../egui-themes`](src/egui-widgetkit/egui-themes) | Token-based theming engine with 12 curated palettes (Catppuccin, Dracula, TokyoNight, etc.) and live preview gallery. | [Guide](docs/usage/egui-themes.md) |
-| **`egui-spring`** | [`src/.../egui-spring`](src/egui-widgetkit/egui-spring) | Animated selection highlights, continuous spring bounding rects (`SpringRect`), highlight groups, and cursor springs. | [Guide](docs/usage/egui-spring.md) |
-| **`egui-vim-nav`** | [`src/.../egui-vim-nav`](src/egui-widgetkit/egui-vim-nav) | Spatial focus graphs, HJKL directional navigation, scrolloff margins, cursor autohide, and modal Vim buffer editing. | [Guide](docs/usage/egui-vim-nav.md) |
-| **`egui-widgets`** | [`src/.../egui-widgets`](src/egui-widgetkit/egui-widgets) | Full suite of tactile, animated, theme-aware UI components (Button, Card, Dropdown, Slider, Switch, TextInput, Tabs, etc.). | [Docs Index](docs/usage/) |
-| **`egui-layout`** | [`src/.../egui-layout`](src/egui-widgetkit/egui-layout) | Responsive, nested declarative split layouts (`Split::horizontal()`, `Split::vertical()`) with card framing. | [Guide](docs/usage/egui-layout.md) |
-| **`egui-nav-stack`** | [`src/.../egui-nav-stack`](src/egui-widgetkit/egui-nav-stack) | App-owned back-stack screen navigation with spring-animated horizontal slide transitions. | [Guide](docs/usage/egui-nav-stack.md) |
+It bridges the gap between raw immediate-mode graphics and the polished, organic feel of modern high-end desktop applications (like Linear, Raycast, and Blender)—combining **analytical ODE spring physics**, **Vim-style modal keyboard navigation**, **in-place morphing geometry**, and **token-driven semantic palettes** into a decoupled, zero-global-state architecture.
 
 ---
 
-## Component Inventory (`egui-widgets`)
+## 🎯 The Purpose & Vision
 
-All components feature **micro-interaction spring physics**, **token palette integration**, **Vim navigation bindings**, and **stateful/stateless duality**:
+Traditional immediate-mode UIs often feel static, linear, or visually disconnected:
+- Colors are hardcoded with ad-hoc hex values.
+- Animations rely on linear `lerp` timers rather than physical mass and velocity.
+- Mouse hover states exist in isolation from keyboard focus.
+- Popups and dropdowns spawn as disconnected floating windows that clip or stutter.
 
-| Component | Description | Highlights | Usage Doc |
-| :--- | :--- | :--- | :--- |
-| **`Button`** | Tactile pop buttons | Press squash, focus bounce impulse, luminance glide, 7 semantic variants, badges, shortcut slots | [`docs/usage/button.md`](docs/usage/button.md) |
-| **`Card`** | Container surface panels | Spring focus lift, ambient drop shadow, header slot, interactive mode, focus ring border | [`docs/usage/card.md`](docs/usage/card.md) |
-| **`Dropdown`** | In-place morphing menu | 2-tier highlights (selection + sliding focus pill), scrolloff margins, selection-anchored framing | [`docs/usage/dropdown.md`](docs/usage/dropdown.md) |
-| **`Switch`** | Fluid toggle switch | Elastic thumb travel, smooth track color crossfade, press squash, focus jiggle | [`docs/usage/switch.md`](docs/usage/switch.md) |
-| **`Slider`** | Kinetic numeric slider | Dynamic scaling thumb, kinetic badge catchup, inline typing modal (`i`/`e`), direct click | [`docs/usage/slider.md`](docs/usage/slider.md) |
-| **`TextInput`** | Modal text field | High-contrast block cursor with color inversion, spring focus glow, full Vim buffer editing | [`docs/usage/text-input.md`](docs/usage/text-input.md) |
-| **`SegmentedTabs`** | Pill tab switcher | Continuous sliding indicator pill with spring width/position tracking, badges, icons | [`docs/usage/tabs.md`](docs/usage/tabs.md) |
-| **`Checkbox`** | Animated check box | Physics-driven checkmark stroke draw, scale bounce overshoot, label alignment | [`docs/usage/checkbox.md`](docs/usage/checkbox.md) |
-| **`RadioButton`** | Elastic radio dot | Concentric circle expansion, scale bounce, mutually exclusive groups | [`docs/usage/checkbox.md`](docs/usage/checkbox.md) |
-| **`Badge`** | Status tags & indicators | Dynamic width spring, semantic variant colors, optional live pulse dot | [`docs/usage/badge.md`](docs/usage/badge.md) |
-| **`ProgressBar`** | Kinetic progress meter | Elastic fill bar with physical spring catchup, striped animated variant | [`docs/usage/progress-bar.md`](docs/usage/progress-bar.md) |
+**`egui-widgetkit` re-imagines egui with five core pillars:**
+
+1. **Physical Tactility (Game-Feel Physics)**  
+   Every interaction—a button click, a tab switch, a dropdown expansion, or a slider adjustment—is driven by closed-form analytical spring ODEs. UI elements carry simulated mass, momentum, and elasticity. When an animation finishes, physics settle cleanly to **0.00% CPU utilization**.
+
+2. **Keyboard-First & Vim Modal Agility**  
+   Your hands never need to leave the home row. Directional focus graphs let you navigate complex layouts using `H`/`J`/`K`/`L` or arrow keys. Text inputs feature a full modal editing engine with Normal, Insert, and Visual modes, text objects (`iw`, `i"`), operators (`d`, `c`, `y`), and register memory.
+
+3. **Unified Highlight-Focus Paradigm**  
+   There is no separate "mouse hover" vs "keyboard focus" logic. Both mouse pointer movement and keyboard navigation feed into the same spatial navigator. When an element is focused, it animates with identical luminance glides, elevation lifts, and bounce pulses regardless of input source.
+
+4. **In-Place Morphing Over Jarring Overlays**  
+   Menus, dropdowns, and edit fields morph smoothly within the layout rather than spawning detached OS windows or jarring instant overlays.
+
+5. **Token-Based Design System**  
+   Zero hardcoded colors. All components automatically derive their background fills, active states, border strokes, and typographic hierarchy from unified semantic tokens (`base`, `surface0..2`, `accent`, `text`, `danger`, etc.) with instant live palette switching.
 
 ---
 
-## Quick Start
+## 🌟 The Feature Showroom
 
-### 1. Add Dependencies
+```
+                               ┌────────────────────────┐
+                               │     egui-widgetkit     │
+                               └───────────┬────────────┘
+         ┌───────────────────┬─────────────┼───────────────┬───────────────────┐
+         ▼                   ▼             ▼               ▼                   ▼
+  ⚡ Spring Physics   ⌨️ Vim Nav     🎨 Themes       🧩 Widgets       📐 Layout & Stacks
+  (ODE math engine)   (HJKL & Modal) (12 Palettes)   (11 Components)  (Splits & Screens)
+```
 
-In your `Cargo.toml`:
+---
+
+### 1. ⚡ Analytical Spring Physics (`spring-core` & `egui-spring`)
+*True physical mass-spring-damper dynamics without frame-rate dependency.*
+
+- **Closed-Form ODE Solver**: Computes position and velocity instantaneously via exact analytical equations ($x(t)$ and $v(t)$) for underdamped, critically damped, and overdamped regimes.
+- **Micro-Interaction Tuning**:
+  - **Press Squash & Pop**: Compresses on mouse-down/Enter, snaps back on release with organic overshoot.
+  - **Focus Jiggle**: Injects a momentary velocity impulse upon selection arrival.
+  - **Continuous Spring Highlights (`SpringRect`)**: A dynamic bounding box that stretches, squashes, and glides smoothly as focus moves between elements.
+- **Smart Idle Repaint**: Automatically calls `ctx.request_repaint()` every frame while springs are in motion, and seamlessly sleeps when all springs settle.
+
+---
+
+### 2. ⌨️ Vim Navigation & Modal Text Engine (`egui-vim-nav`)
+*Full spatial keyboard navigation and embedded modal editing.*
+
+- **Spatial Focus Graph**: Define your layout as a graph of nodes with directional edges (`connect_horizontal`, `connect_vertical`, `connect_grid`).
+- **2-Tier Hierarchical Traversal**: First navigates within the current card/section, then seamlessly crosses section boundaries when hitting margins.
+- **Scrolloff Viewport Keeping**: Automatic spring-driven viewport scrolling that keeps the focused widget framed with comfortable padding margins (just like Vim's `scrolloff`).
+- **Modal Text Buffer (`VimBufferState`)**:
+  - **Modes**: Normal, Insert, Visual (character-wise), and Operator-Pending.
+  - **Motions**: `h`/`j`/`k`/`l`, `w`/`b`/`e`, `0`/`$`, `gg`/`G`, `f{char}`/`t{char}`.
+  - **Operators**: Delete (`d`), Change (`c`), Yank (`y`), Paste (`p`), Replace (`r`), Undo (`u`).
+  - **Text Objects**: Inner word (`iw`), inner quotes (`i"`), inner parens (`i(`).
+- **Cursor Autohide**: Hides the mouse cursor during keyboard navigation to prevent visual clutter, automatically restoring it when the mouse moves.
+
+---
+
+### 3. 🧩 Tactile Component Suite (`egui-widgets`)
+*11 customizable, spring-animated, theme-aware components.*
+
+- **Button**: 7 semantic variants (Primary, Secondary, Ghost, Danger, Outline, Success, Warning) with icon, badge, and shortcut slots.
+- **Card**: Elevated container panels with optional spring focus lift, ambient drop shadows, and structured header layouts.
+- **Dropdown**: In-place height morphing with trajectory springs, 2-tier highlights (saved item marker + sliding focus pill), and selection-anchored expansion framing.
+- **Switch**: Elastic thumb translation, smooth track color crossfading, and press squash.
+- **Slider**: Spring-scaling knob thumb, kinetic badge catchup, direct drag, and modal inline typing (`i` to type value, Enter to commit).
+- **TextInput**: Inverted high-contrast block cursor, spring focus glow ring, and integrated Vim buffer state.
+- **SegmentedTabs**: Sliding indicator pill that physically tracks tab position and width changes.
+- **Checkbox & RadioButton**: Physics-driven stroke draw animations and concentric dot expansions with scale overshoot.
+- **Badge & ProgressBar**: Elastic width badges with live pulse dots, and progress meters with physical spring catchup.
+
+---
+
+### 4. 🎨 Token-Based Design System (`egui-themes`)
+*Cohesive, designer-grade color harmony across the entire UI.*
+
+- **12 Curated Palettes Ready Out-of-the-Box**:
+  - 🐱 **Catppuccin**: Mocha, Macchiato, Frappé, Latte
+  - 🧛 **Dracula**
+  - 🏙️ **Tokyo Night**: Dark, Storm, Light
+  - 🪵 **Gruvbox**: Dark, Light
+  - ❄️ **Nord**
+  - 🌌 **One Dark**
+- **Semantic Token Hierarchy**: Colors are organized logically (`base`, `mantle`, `crust`, `surface0..2`, `text`, `subtext0..1`, `accent`, `danger`, `warning`, `success`).
+- **Runtime Theme Morphing**: Live switching interpolates colors smoothly across frames and automatically synchronizes with `egui::Visuals`.
+
+---
+
+### 5. 📐 Split Layouts & Screen Transitions (`egui-layout` & `egui-nav-stack`)
+*Responsive structure and fluid view management.*
+
+- **Nested Declarative Splits**: Build complex multi-pane layouts with `Split::horizontal()` and `Split::vertical()` using exact, proportional, or auto-expanding sizes.
+- **App-Owned Navigation Stack (`NavStack`)**: Type-safe screen management with push, pop, replace, and back operations.
+- **Physics Slide Transitions**: Smooth horizontal screen slide-in / slide-out animations between views.
+
+---
+
+## 📚 Complete Documentation Directory
+
+Every crate and component has a dedicated, comprehensive usage guide with full API references and copy-pasteable examples:
+
+### 📦 Core Library Crates
+
+| Guide | Crate Path | What It Covers |
+| :--- | :--- | :--- |
+| [**`spring-core`**](docs/usage/spring-core.md) | `src/egui-widgetkit/spring-core` | ODE physics math, `Spring`, `SpringParams`, parameter tuning |
+| [**`egui-themes`**](docs/usage/egui-themes.md) | `src/egui-widgetkit/egui-themes` | `ThemePalette`, 12 presets, `ThemeState`, color interpolation |
+| [**`egui-spring`**](docs/usage/egui-spring.md) | `src/egui-widgetkit/egui-spring` | `SpringRect`, `HighlightGroup`, `CornerSprings`, highlight sync |
+| [**`egui-vim-nav`**](docs/usage/egui-vim-nav.md) | `src/egui-widgetkit/egui-vim-nav` | Focus graph, Navigator, Vim modal text buffer, scrolloff |
+| [**`egui-layout`**](docs/usage/egui-layout.md) | `src/egui-widgetkit/egui-layout` | `Split::horizontal()`, `Split::vertical()`, section sizing |
+| [**`egui-nav-stack`**](docs/usage/egui-nav-stack.md) | `src/egui-widgetkit/egui-nav-stack` | `NavStack`, animated screen transitions, routing |
+
+### 🧩 UI Components (`egui-widgets`)
+
+| Guide | Component | Key Highlights |
+| :--- | :--- | :--- |
+| [**Button**](docs/usage/button.md) | `Button`, `ButtonState` | Tactile bounce, 7 variants, size presets, icon/badge slots |
+| [**Card**](docs/usage/card.md) | `Card`, `CardState` | Focus elevation lift, drop shadow, header slots, focus rings |
+| [**Dropdown**](docs/usage/dropdown.md) | `Dropdown`, `DropdownState` | In-place morphing, 2-tier highlights, scrolloff, rich options |
+| [**Switch**](docs/usage/switch.md) | `Switch`, `SwitchState` | Elastic thumb spring, smooth color crossfade, focus bounce |
+| [**Slider**](docs/usage/slider.md) | `Slider`, `SliderState` | Spring knob, kinetic badge, inline typing modal (`i`/`e`) |
+| [**TextInput**](docs/usage/text-input.md) | `TextInput`, `InputState` | High-contrast block cursor, spring focus glow, Vim buffer |
+| [**Segmented Tabs**](docs/usage/tabs.md) | `SegmentedTabs`, `TabsState` | Sliding pill indicator, spring width/position tracking |
+| [**Checkbox & Radio**](docs/usage/checkbox.md) | `Checkbox`, `RadioButton` | Stroke drawing animation, concentric radio dots, overshoot |
+| [**Badge**](docs/usage/badge.md) | `Badge`, `BadgeVariant` | Dynamic width spring, status dots, semantic colors |
+| [**Progress Bar**](docs/usage/progress-bar.md) | `ProgressBar`, `ProgressState` | Elastic fill catchup, striped animated variant |
+
+---
+
+## ⚡ Quick Integration
+
+Add the crates to your `Cargo.toml` using local paths or Git:
 
 ```toml
 [dependencies]
 egui = "0.27"
 eframe = "0.27"
 
-# Reference crates locally or via Git
-egui-widgets   = { path = "path/to/egui-lib/src/egui-widgetkit/egui-widgets" }
-egui-themes    = { path = "path/to/egui-lib/src/egui-widgetkit/egui-themes" }
-egui-vim-nav   = { path = "path/to/egui-lib/src/egui-widgetkit/egui-vim-nav" }
-egui-spring    = { path = "path/to/egui-lib/src/egui-widgetkit/egui-spring" }
-egui-layout    = { path = "path/to/egui-lib/src/egui-widgetkit/egui-layout" }
-egui-nav-stack = { path = "path/to/egui-lib/src/egui-widgetkit/egui-nav-stack" }
-spring-core    = { path = "path/to/egui-lib/src/egui-widgetkit/spring-core" }
+egui-widgets = { path = "path/to/egui-lib/src/egui-widgetkit/egui-widgets" }
+egui-themes  = { path = "path/to/egui-lib/src/egui-widgetkit/egui-themes" }
+egui-vim-nav = { path = "path/to/egui-lib/src/egui-widgetkit/egui-vim-nav" }
 ```
 
-### 2. Complete Example App
+### Minimal Themed Dashboard:
 
 ```rust
 use eframe::egui;
 use egui_themes::{ThemePalette, ThemePreset};
-use egui_widgets::{Button, Card, Dropdown, DropdownOption, SegmentedTabs, Slider, Switch, TabItem};
+use egui_widgets::{Button, Card, Slider, Switch};
 
-struct MyApp {
+struct App {
     palette: ThemePalette,
-    active_tab: usize,
-    turbo_mode: bool,
-    bandwidth: f64,
-    selected_region: usize,
+    turbo: bool,
+    power: f64,
 }
 
-impl Default for MyApp {
+impl Default for App {
     fn default() -> Self {
         Self {
-            palette: ThemePreset::CatppuccinMocha.palette(),
-            active_tab: 0,
-            turbo_mode: true,
-            bandwidth: 42.0,
-            selected_region: 0,
+            palette: ThemePreset::TokyoNightStorm.palette(),
+            turbo: true,
+            power: 75.0,
         }
     }
 }
 
-impl eframe::App for MyApp {
+impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default()
             .frame(egui::Frame::none().fill(self.palette.base))
             .show(ctx, |ui| {
-                ui.add_space(20.0);
-
-                // Container Card with theme styling and spring focus lift
                 Card::new()
                     .palette(&self.palette)
-                    .title("Control Dashboard")
-                    .subtitle("Spring-animated tactile widgets")
+                    .title("System Controls")
+                    .subtitle("Spring physics enabled")
                     .show(ui, |ui| {
-                        // Sliding Pill Tabs
-                        SegmentedTabs::new(
-                            &mut self.active_tab,
-                            vec![
-                                TabItem::new(0, "Overview").icon("📊"),
-                                TabItem::new(1, "Network").icon("🌐"),
-                                TabItem::new(2, "Settings").icon("⚙️"),
-                            ],
-                        )
-                        .palette(&self.palette)
-                        .show(ui);
-
-                        ui.add_space(12.0);
-
-                        // Elastic Switch
-                        Switch::new(&mut self.turbo_mode)
+                        Switch::new(&mut self.turbo)
                             .palette(&self.palette)
-                            .label("Turbo Acceleration")
+                            .label("Hyperdrive")
                             .show(ui);
 
-                        ui.add_space(8.0);
-
-                        // Kinetic Numeric Slider
-                        Slider::new(&mut self.bandwidth, 0.0..=100.0)
+                        Slider::new(&mut self.power, 0.0..=100.0)
                             .palette(&self.palette)
-                            .label("Throughput")
-                            .suffix(" GB/s")
+                            .label("Output")
+                            .suffix(" %")
                             .show(ui);
 
-                        ui.add_space(8.0);
-
-                        // In-Place Morphing Dropdown
-                        let regions = vec![
-                            DropdownOption::new(0, "US-East (N. Virginia)").icon("🇺🇸"),
-                            DropdownOption::new(1, "EU-Central (Frankfurt)").icon("🇩🇪"),
-                            DropdownOption::new(2, "AP-East (Tokyo)").icon("🇯🇵"),
-                        ];
-                        Dropdown::new("region_dropdown", &mut self.selected_region, &regions)
+                        if Button::new("Engage Engine")
                             .palette(&self.palette)
-                            .show(ui);
-
-                        ui.add_space(16.0);
-
-                        // Tactile Buttons
-                        ui.horizontal(|ui| {
-                            if Button::new("Deploy Changes")
-                                .palette(&self.palette)
-                                .primary()
-                                .show(ui)
-                                .clicked()
-                            {
-                                println!("Deployed!");
-                            }
-
-                            if Button::new("Reset")
-                                .palette(&self.palette)
-                                .ghost()
-                                .show(ui)
-                                .clicked()
-                            {
-                                self.bandwidth = 0.0;
-                            }
-                        });
+                            .primary()
+                            .show(ui)
+                            .clicked()
+                        {
+                            println!("Engaged at {}%", self.power);
+                        }
                     });
             });
     }
 }
-
-fn main() -> eframe::Result<()> {
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([480.0, 520.0]),
-        ..Default::default()
-    };
-    eframe::run_native(
-        "Widgetkit Demo",
-        options,
-        Box::new(|_cc| Box::new(MyApp::default())),
-    )
-}
 ```
 
 ---
 
-## Core Features & Subsystems
+## 🏛️ Architectural Invariants
 
-### 1. 🌸 Token-Based Theming (`egui-themes`)
-- **12 Curated Presets**: Catppuccin (Mocha, Macchiato, Frappe, Latte), Dracula, TokyoNight (Dark/Storm/Light), Gruvbox (Dark/Light), Nord, and OneDark.
-- **Design Tokens**: Single source of truth defining `base`, `mantle`, `crust`, `surface0..2`, `text`, `subtext0..1`, `accent`, `success`, `warning`, and `danger`.
-- **Runtime Switching**: Smooth palette morphing with automatic `egui::Visuals` synchronization.
+`egui-widgetkit` enforces strict architectural guarantees across all crates:
 
-### 2. ⚡ Closed-Form Spring Physics (`spring-core` & `egui-spring`)
-- **Pure Math Solver**: Closed-form ODE spring simulation for underdamped, critically damped, and overdamped regimes.
-- **Continuous Motion Repaint**: Springs wake the UI with `ctx.request_repaint()` while in motion and idle at `0.00%` CPU when settled.
-- **Bounding Highlights**: `SpringRect` provides smooth spatial interpolation across moving focus selections.
-
-### 3. ⌨️ Vim Navigation & Modal Editing (`egui-vim-nav`)
-- **Spatial Focus Graph**: Topology-agnostic node graph with HJKL directional edges and grid shortcuts.
-- **Hierarchical 2-Pass Navigation**: Seamless movement within widget clusters and across layout sections.
-- **Modal Text Buffer**: Normal, Insert, Visual, and Replace modes supporting motions (`w`, `b`, `0`, `$`, `f{char}`, `gg`, `G`), operators (`d`, `c`, `y`, `p`, `r`), text objects (`iw`, `i"`), registers, and undo/redo.
-- **Scrolloff & Autohide**: Keeps focused items centered with comfort margins; autohides the mouse cursor on keyboard interaction.
-
-### 4. 📐 Responsive Split Layouts (`egui-layout`)
-- **Declarative Splits**: Compose responsive horizontal and vertical splits (`Split::horizontal()`, `Split::vertical()`).
-- **Flexible Sizing**: Proportional weights, exact pixels, and auto-expanding panels with integrated card backgrounds.
-
-### 5. 🗂️ Screen Navigation Stack (`egui-nav-stack`)
-- **App-Owned Back-Stack**: Type-safe view management with forward/backward push/pop operations.
-- **Animated Transitions**: Physical spring slide-in / slide-out transitions with configurable direction and easing.
+1. **Explicit State Ownership**: All state is owned by your application struct (`&mut State`) or safely isolated in egui's ID memory. No global singletons, hidden static variables, or mysterious background threads.
+2. **Pure `egui::Shape` Output**: 100% standard egui mesh output. Zero custom `wgpu`/`glow` pipelines or opaque `PaintCallback` calls—making it completely portable to WebAssembly (Wasm) and all egui backends.
+3. **Continuous Motion Repaint Loop**: Animated widgets request continuous redraws (`ctx.request_repaint()`) only while physical velocities are nonzero. The moment springs settle, CPU usage drops to idle.
+4. **Intact Corner Rounding**: Rounded corners on cards, pills, buttons, and highlights are guaranteed never to clip flat against parent boundaries.
+5. **No Hover Residue**: Unified focus architecture ensures mouse pointers and keyboard events animate the exact same tactile highlights.
 
 ---
 
-## Architectural Principles & Invariants
+## 🚀 Running the Interactive Showcase
 
-1. **State Ownership**:
-   All state is plain Rust structs owned by the consuming application (`&mut state`) or scoped to egui's temporary ID memory. Zero hidden singletons or global state.
-2. **`egui::Shape` Rendering Only**:
-   All visual output uses standard `egui::Shape` primitives. Zero raw `wgpu`/`glow` shader pipelines or opaque render callbacks.
-3. **Unified Highlight Focus (No Raw Hover Residue)**:
-   Widgets do not have disconnected mouse hover effects. Both pointer position and keyboard navigation feed into the same unified focus system (`.focused(bool)`), animating identical glides and bounce impulses.
-4. **Corner Rounding Invariant**:
-   All widget, card, and highlight corner roundings stay fully intact across arbitrary bounds without parent clipping distortion.
-
----
-
-## Detailed Documentation (`docs/usage/`)
-
-| Guide | Scope |
-| :--- | :--- |
-| 📖 [**Spring Core**](docs/usage/spring-core.md) | Analytical spring physics API, parameter tuning, ODE math |
-| 📖 [**Layout Engine**](docs/usage/egui-layout.md) | Split layouts, section sizing, responsive layout containers |
-| 📖 [**Spring Highlights**](docs/usage/egui-spring.md) | `SpringRect`, `HighlightGroup`, cursor physics, morphing boxes |
-| 📖 [**Themes & Palettes**](docs/usage/egui-themes.md) | `ThemePalette`, 12 presets, live theme gallery, color lerp |
-| 📖 [**Vim Navigation**](docs/usage/egui-vim-nav.md) | FocusGraph, Navigator, VimBuffer modal editing, scrolloff |
-| 📖 [**Navigation Stack**](docs/usage/egui-nav-stack.md) | Screen back-stack, push/pop routing, animated transitions |
-| 📖 [**Button**](docs/usage/button.md) | Button variants, sizes, icons, shortcut hints, badges |
-| 📖 [**Card**](docs/usage/card.md) | Panel containers, focus lift, shadows, headers |
-| 📖 [**Dropdown**](docs/usage/dropdown.md) | Morphing dropdown, 2-tier highlights, scrolloff, options |
-| 📖 [**Switch**](docs/usage/switch.md) | Elastic toggle switch, track crossfade, label placement |
-| 📖 [**Slider**](docs/usage/slider.md) | Kinetic slider, inline Vim typing modal, spring knob |
-| 📖 [**TextInput**](docs/usage/text-input.md) | Inverted block cursor, focus glow ring, modal buffer |
-| 📖 [**Segmented Tabs**](docs/usage/tabs.md) | Sliding pill switcher, badge counts, icons |
-| 📖 [**Checkbox & Radio**](docs/usage/checkbox.md) | Animated checkmarks, radio dots, scale bounce overshoot |
-| 📖 [**Badge**](docs/usage/badge.md) | Status badges, dynamic width spring, semantic colors |
-| 📖 [**ProgressBar**](docs/usage/progress-bar.md) | Physical catchup bar, striped animation, percentage text |
-
----
-
-## Interactive Demo Application
-
-Run the bundled showcase app at `src/test-app/` to explore all widgets, physics visualizers, and navigation modes interactively:
+The workspace includes a rich, multi-scene interactive test application at `src/test-app`:
 
 ```bash
-# Launch interactive showcase
+# Run the interactive showcase application
 cargo run -p test-app
 
-# Or in release mode for maximum fluidity
+# Or in release mode for maximum physics smoothness
 cargo run -p test-app --release
 ```
 
-## Running the Test Suite
+### Running the Test Suite:
 
 ```bash
-# Run all 186 unit, integration, and doc tests across all crates
+# Run all 186 unit, integration, and doc tests across all 7 crates
 cargo test --workspace
 ```
 
 ---
 
-## License
+## 📄 License
 
-Dual-licensed under either of:
+Dual-licensed under either:
 
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or <http://www.apache.org/licenses/LICENSE-2.0>)
-- MIT license ([LICENSE-MIT](LICENSE-MIT) or <http://opensource.org/licenses/MIT>)
+- **MIT License** ([LICENSE-MIT](LICENSE-MIT) or <http://opensource.org/licenses/MIT>)
+- **Apache License, Version 2.0** ([LICENSE-APACHE](LICENSE-APACHE) or <http://www.apache.org/licenses/LICENSE-2.0>)
 
 at your option.
