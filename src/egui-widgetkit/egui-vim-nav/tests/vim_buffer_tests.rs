@@ -497,3 +497,34 @@ fn test_vim_dynamic_operator_pending_and_replace_mode() {
     assert_eq!(state.text(), "best");
     assert_eq!(state.mode(), VimMode::Normal);
 }
+
+#[test]
+fn test_vim_ctrl_c_returns_to_normal_mode() {
+    use egui::{Key, Modifiers};
+
+    let mut state = VimBufferState::new("hello world");
+
+    // 1. From Insert mode -> Normal mode on Ctrl+C
+    state.handle_char('i');
+    assert_eq!(state.mode(), VimMode::Insert);
+    let handled = state.handle_key(Key::C, &Modifiers::CTRL);
+    assert!(handled);
+    assert_eq!(state.mode(), VimMode::Normal);
+
+    // 2. From Visual mode -> Normal mode on Ctrl+C (clearing selection)
+    state.handle_char('v');
+    state.handle_char('e');
+    assert!(state.mode().is_visual());
+    assert!(state.selection_range().is_some());
+    let handled = state.handle_key(Key::C, &Modifiers::CTRL);
+    assert!(handled);
+    assert_eq!(state.mode(), VimMode::Normal);
+    assert!(state.selection_range().is_none());
+
+    // 3. From Replace mode -> Normal mode on Ctrl+C
+    state.handle_char('R');
+    assert_eq!(state.mode(), VimMode::Replace);
+    let handled = state.handle_key(Key::C, &Modifiers::CTRL);
+    assert!(handled);
+    assert_eq!(state.mode(), VimMode::Normal);
+}

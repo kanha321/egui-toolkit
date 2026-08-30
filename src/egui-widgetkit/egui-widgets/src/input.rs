@@ -8,12 +8,12 @@
 //! Focus animations are tracked in ID temporary storage or an app-owned [`InputState`] (`CODING_RULES §2`).
 
 use egui::{
-    pos2, vec2, Align2, Color32, FontId, Id, Rect, Response, Rounding, Sense, Shape, Stroke,
+    pos2, vec2, Align2, Color32, FontId, Id, LayerId, Order, Rect, Response, Rounding, Sense, Shape, Stroke,
     TextEdit, TextStyle, Ui, Vec2, WidgetText,
 };
 use egui_spring::SpringCursor;
 use egui_themes::ThemePalette;
-use egui_vim_nav::{VimBufferState, VimMode};
+use egui_vim_nav::{VimBufferState, VimMode, VisualType};
 use spring_core::{Spring, SpringParams};
 
 /// Persistent animation state for text input focus effects.
@@ -104,6 +104,115 @@ impl TextSwipeAnimation {
     }
 }
 
+/// State of an active selection drag-and-drop operation.
+#[derive(Clone, Debug)]
+pub struct DragSelectionState {
+    /// Sliced text content being dragged.
+    pub text: String,
+    /// Last seen mouse pointer position for velocity estimation.
+    pub last_pos: egui::Pos2,
+    /// Offset from pointer position to top-left of dragged text slice (grab offset).
+    pub grab_offset: egui::Vec2,
+    /// Estimated pointer velocity (pixels / second).
+    pub velocity: egui::Vec2,
+    /// Target drop character index in remaining text buffer.
+    pub target_char_idx: usize,
+    /// Character index where text was extracted from in original buffer.
+    pub split_char_idx: usize,
+    /// Spring animating the closure of the extraction gap (extracted_width -> 0.0).
+    pub close_spring: Spring,
+}
+
+/// Physics-driven 2D spring flight animation when releasing dragged text.
+#[derive(Clone, Debug)]
+pub struct DropFlightAnim {
+    /// Sliced text being flown into place.
+    pub text: String,
+    /// 2D spring for horizontal position.
+    pub x_spring: Spring,
+    /// 2D spring for vertical position.
+    pub y_spring: Spring,
+    /// Spring driving scale transition (1.10 -> 1.0) on landing.
+    pub scale_spring: Spring,
+    /// Spring driving the parting gap opening for the incoming text (0.0 -> target_gap_width).
+    pub gap_spring: Spring,
+    /// Target destination position on baseline.
+    pub dest_pos: egui::Pos2,
+    /// Character index where text was inserted in the final text buffer.
+    pub split_char_idx: usize,
+    /// Target width of the opening gap.
+    pub target_gap_width: f32,
+    /// Destination byte range in newly spliced text.
+    pub dest_range: std::ops::Range<usize>,
+}
+
+impl DropFlightAnim {
+    pub fn new(
+        text: String,
+        start_pos: egui::Pos2,
+        velocity: egui::Vec2,
+        dest_pos: egui::Pos2,
+        split_char_idx: usize,
+        target_gap_width: f32,
+        dest_range: std::ops::Range<usize>,
+    ) -> Self {
+        let mut x_spring = Spring::new(start_pos.x, SpringParams::new(26.0, 0.65));
+        x_spring.velocity = velocity.x;
+        x_spring.set_target(dest_pos.x);
+
+        let mut y_spring = Spring::new(start_pos.y, SpringParams::new(26.0, 0.65));
+        y_spring.velocity = velocity.y;
+        y_spring.set_target(dest_pos.y);
+
+        let mut scale_spring = Spring::new(1.10, SpringParams::new(26.0, 0.65));
+        scale_spring.set_target(1.0);
+
+        let mut gap_spring = Spring::new(0.0, SpringParams::new(26.0, 0.65));
+        gap_spring.set_target(target_gap_width);
+
+        Self {
+            text,
+            x_spring,
+            y_spring,
+            scale_spring,
+            gap_spring,
+            dest_pos,
+            split_char_idx,
+            target_gap_width,
+            dest_range,
+        }
+    }
+
+    pub fn update(&mut self, dt: f32) {
+        self.x_spring.set_target(self.dest_pos.x);
+        self.y_spring.set_target(self.dest_pos.y);
+        self.scale_spring.set_target(1.0);
+        self.gap_spring.set_target(self.target_gap_width);
+        self.x_spring.update(dt);
+        self.y_spring.update(dt);
+        self.scale_spring.update(dt);
+        self.gap_spring.update(dt);
+    }
+
+    pub fn is_settled(&self) -> bool {
+        self.x_spring.is_settled()
+            && self.y_spring.is_settled()
+            && self.scale_spring.is_settled()
+            && self.gap_spring.is_settled()
+    }
+}
+
+/// Selection overlay fade-out state when selected text is pulled / extracted into a drag.
+#[derive(Clone, Debug)]
+pub struct PullFade {
+    /// Rect of the selection overlay that was lifted.
+    pub rect: egui::Rect,
+    /// Mode color of the selection when pulled.
+    pub color: Color32,
+    /// Spring driving continuous alpha fade out ($1.0 \to 0.0$).
+    pub fade_spring: Spring,
+}
+
 /// Persistent animation state for text inputs with spring-animated focus rings.
 #[derive(Clone, Debug)]
 pub struct InputState {
@@ -125,6 +234,14 @@ pub struct InputState {
     pub swipe_anim: Option<TextSwipeAnimation>,
     /// Spring driving smooth horizontal autoscroll when text exceeds input width.
     pub scroll_spring: Spring,
+    /// Active text selection drag operation.
+    pub drag_selection: Option<DragSelectionState>,
+    /// Physics-driven 2D spring flight animation for dropped text docking into place.
+    pub drop_flight: Option<DropFlightAnim>,
+    /// Spring driving smooth selection overlay fade-in ($0.0 \to 1.0$) on drop release / landing.
+    pub selection_fade_spring: Spring,
+    /// Active selection overlay fade-out animation when text is pulled into a drag.
+    pub pull_fade: Option<PullFade>,
 }
 
 impl Default for InputState {
@@ -139,6 +256,10 @@ impl Default for InputState {
             last_text: None,
             swipe_anim: None,
             scroll_spring: Spring::new(0.0, SpringParams::new(26.0, 0.48)),
+            drag_selection: None,
+            drop_flight: None,
+            selection_fade_spring: Spring::new(1.0, SpringParams::new(22.0, 0.60)),
+            pull_fade: None,
         }
     }
 }
@@ -152,6 +273,7 @@ impl InputState {
         self.focus_spring.set_target(if is_focused { 1.0 } else { 0.0 });
         self.focus_spring.update(dt);
         self.scroll_spring.update(dt);
+        self.selection_fade_spring.update(dt);
 
         if let Some(ref mut anim) = self.swipe_anim {
             anim.update(dt);
@@ -167,18 +289,40 @@ impl InputState {
             }
         }
 
+        if let Some(ref mut flight) = self.drop_flight {
+            flight.update(dt);
+            if flight.is_settled() {
+                self.drop_flight = None;
+            }
+        }
+
+        if let Some(ref mut drag_st) = self.drag_selection {
+            drag_st.close_spring.update(dt);
+        }
+
+        if let Some(ref mut pull) = self.pull_fade {
+            pull.fade_spring.update(dt);
+            if pull.fade_spring.is_settled() {
+                self.pull_fade = None;
+            }
+        }
+
         if !self.is_settled() {
             ctx.request_repaint();
         }
     }
 
-    /// Returns `true` if all focus and cursor springs have settled.
+    /// Returns `true` if all focus, flight, and cursor springs have settled.
     pub fn is_settled(&self) -> bool {
         self.focus_spring.is_settled()
             && self.cursor_spring.is_settled()
             && self.scroll_spring.is_settled()
             && self.deleted_segment.as_ref().map_or(true, |d| d.fade_spring.is_settled())
             && self.swipe_anim.as_ref().map_or(true, |s| s.is_settled())
+            && self.drop_flight.as_ref().map_or(true, |f| f.is_settled())
+            && self.drag_selection.as_ref().map_or(true, |d| d.close_spring.is_settled())
+            && self.selection_fade_spring.is_settled()
+            && self.pull_fade.as_ref().map_or(true, |p| p.fade_spring.is_settled())
     }
 }
 
@@ -455,7 +599,7 @@ impl<'a> TextInput<'a> {
         };
         let desired_size = vec2(width, height);
 
-        let (rect, response) = ui.allocate_exact_size(desired_size, Sense::click());
+        let (rect, response) = ui.allocate_exact_size(desired_size, Sense::click_and_drag());
 
         // Resolve colors
         let (bg_fill, base_stroke, focus_stroke, text_color, placeholder_color) =
@@ -596,11 +740,9 @@ impl<'a> TextInput<'a> {
             let resp = ui.interact(
                 rect,
                 click_id,
-                Sense::click(),
+                Sense::click_and_drag(),
             );
-            if resp.clicked() || response.clicked() {
-                vbuf.mode = VimMode::Insert;
-            }
+            let interact_resp = response.union(resp);
 
             if ui.is_rect_visible(edit_rect) {
                 let painter = ui.painter().with_clip_rect(edit_rect);
@@ -617,50 +759,17 @@ impl<'a> TextInput<'a> {
                 }
 
                 // Base text is ALWAYS the current valid text (100% stable, unclipped in normal mode, never disappears!)
-                let display_text = if self.password {
+                let mut display_text = if self.password {
                     "•".repeat(self.text.chars().count())
                 } else {
                     self.text.clone()
                 };
 
-                let galley = painter.layout_no_wrap(display_text.clone(), font_id.clone(), text_color);
+                let mut galley = painter.layout_no_wrap(display_text.clone(), font_id.clone(), text_color);
                 let view_width = edit_rect.width();
-                let text_width = galley.size().x;
+                let mut text_width = galley.size().x;
 
-                // Determine cursor position in text space for autoscroll calculation
-                let cursor_char_idx = if self.text.is_empty() {
-                    0
-                } else {
-                    self.text[..vbuf.cursor.min(self.text.len())].chars().count()
-                };
-                let cur = galley.from_ccursor(egui::text::CCursor::new(cursor_char_idx));
-                let cur_rect = galley.pos_from_cursor(&cur);
-                let cursor_local_x = cur_rect.left();
-
-                // Dynamic horizontal autoscroll calculation
-                if text_width <= view_width || self.text.is_empty() {
-                    state.scroll_spring.set_target(0.0);
-                } else {
-                    let max_scroll = (text_width - view_width + 16.0).max(0.0);
-                    let margin_left = 20.0f32;
-                    let margin_right = (view_width - 28.0).max(margin_left + 10.0);
-                    let cur_target = state.scroll_spring.target;
-                    let cursor_view_x = cursor_local_x - cur_target;
-
-                    if cursor_view_x < margin_left {
-                        state.scroll_spring.set_target((cursor_local_x - margin_left).max(0.0));
-                    } else if cursor_view_x > margin_right {
-                        state.scroll_spring.set_target((cursor_local_x - margin_right).min(max_scroll));
-                    }
-                    state.scroll_spring.set_target(state.scroll_spring.target.clamp(0.0, max_scroll));
-                }
-
-                state.scroll_spring.update(dt);
-                if !state.scroll_spring.is_settled() {
-                    ui.ctx().request_repaint();
-                }
                 let scroll_x = state.scroll_spring.value();
-
                 let base_text_x = match self.align {
                     TextAlign::Left => edit_rect.left(),
                     TextAlign::Center => {
@@ -681,42 +790,321 @@ impl<'a> TextInput<'a> {
                 // Stabilized vertical baseline with horizontal autoscroll displacement
                 let text_pos = pos2(base_text_x - scroll_x, edit_rect.center().y - 8.0);
 
-                // Detect text insertion or deletion compared to previous frame's buffer
-                if let Some(ref last_txt) = state.last_text {
-                    let old_count = last_txt.chars().count();
-                    let new_count = self.text.chars().count();
-                    if new_count > old_count {
-                        // Insertion: characters typed or pasted
-                        let num_inserted = new_count - old_count;
-                        let cursor_char_idx = self.text[..vbuf.cursor.min(self.text.len())].chars().count();
-                        let split_char_idx = cursor_char_idx.saturating_sub(num_inserted);
-                        let inserted_substr: String = self.text.chars().skip(split_char_idx).take(num_inserted).collect();
-                        let ins_galley = painter.layout_no_wrap(inserted_substr.clone(), font_id.clone(), text_color);
-                        let ins_w = ins_galley.size().x.max(7.8);
-                        state.swipe_anim = Some(TextSwipeAnimation::new_insert(split_char_idx, inserted_substr, ins_w));
+                // Precision Mouse Hit-Testing & Multi-Click / Drag Selection / Selection Move
+                let pointer_pos = interact_resp
+                    .interact_pointer_pos()
+                    .or_else(|| ui.input(|i| i.pointer.latest_pos().or(i.pointer.hover_pos())));
+                let press_origin = ui.input(|i| i.pointer.press_origin()).or(pointer_pos);
+
+                if interact_resp.triple_clicked() {
+                    // Triple-click: Select entire text buffer in Visual mode
+                    let total_chars = self.text.chars().count();
+                    let last_char_idx = total_chars.saturating_sub(1);
+                    vbuf.anchor = Some(0);
+                    vbuf.cursor = char_index_to_byte_offset(self.text, last_char_idx);
+                    vbuf.mode = VimMode::Visual(VisualType::Character);
+                    *self.text = vbuf.text().to_owned();
+                    display_text = if self.password { "•".repeat(self.text.chars().count()) } else { self.text.clone() };
+                    galley = painter.layout_no_wrap(display_text.clone(), font_id.clone(), text_color);
+                    text_width = galley.size().x;
+                    state.selection_fade_spring.reset(1.0);
+                    state.drag_selection = None;
+                    ui.ctx().request_repaint();
+                } else if interact_resp.double_clicked() {
+                    // Double-click: Select word under pointer in Visual mode
+                    if let Some(pos) = pointer_pos {
+                        let char_idx = pointer_to_char_index(pos, text_pos, &galley, &display_text);
+                        let byte_offset = char_index_to_byte_offset(self.text, char_idx);
+                        let (start_byte, end_byte) = word_bounds_around_byte(self.text, byte_offset);
+                        let word_end_char = byte_offset_to_char_index(self.text, end_byte);
+                        let word_last_char = word_end_char.saturating_sub(1);
+                        let last_char_byte = char_index_to_byte_offset(self.text, word_last_char);
+                        vbuf.anchor = Some(start_byte);
+                        vbuf.cursor = last_char_byte;
+                        vbuf.mode = VimMode::Visual(VisualType::Character);
+                        *self.text = vbuf.text().to_owned();
+                        display_text = if self.password { "•".repeat(self.text.chars().count()) } else { self.text.clone() };
+                        galley = painter.layout_no_wrap(display_text.clone(), font_id.clone(), text_color);
+                        text_width = galley.size().x;
+                        state.selection_fade_spring.reset(1.0);
+                        state.drag_selection = None;
                         ui.ctx().request_repaint();
-                    } else if new_count < old_count {
-                        // Deletion: characters deleted (single char, backspace, or visual selection cut)
-                        let num_deleted = old_count - new_count;
-                        let cursor_char_idx = self.text[..vbuf.cursor.min(self.text.len())].chars().count();
-                        let split_char_idx = cursor_char_idx.min(old_count);
-                        let deleted_substr: String = last_txt.chars().skip(split_char_idx).take(num_deleted).collect();
-                        let del_galley = painter.layout_no_wrap(deleted_substr.clone(), font_id.clone(), text_color);
-                        let del_w = del_galley.size().x.max(7.8);
+                    }
+                } else if interact_resp.dragged() {
+                    if state.drag_selection.is_none() && interact_resp.drag_started() {
+                        // Check if drag started INSIDE an existing active visual selection range
+                        if let (Some(range), Some(origin_pos)) = (vbuf.selection_range(), press_origin) {
+                            let origin_char = pointer_to_char_index(origin_pos, text_pos, &galley, &display_text);
+                            let origin_byte = char_index_to_byte_offset(self.text, origin_char);
+                            if origin_byte >= range.start && origin_byte < range.end {
+                                let selected_slice = safe_byte_slice(self.text, range.clone()).to_string();
+                                let sel_start_char = byte_offset_to_char_index(self.text, range.start);
+                                let sel_start_cur = galley.from_ccursor(egui::text::CCursor::new(sel_start_char));
+                                let sel_start_x = text_pos.x + galley.pos_from_cursor(&sel_start_cur).left();
+                                let sel_start_pos = pos2(sel_start_x, text_pos.y);
+                                let grab_offset = sel_start_pos - origin_pos;
 
-                        // Calculate position where the deleted characters were located
-                        let prefix_substr: String = last_txt.chars().take(split_char_idx).collect();
-                        let prefix_galley = painter.layout_no_wrap(prefix_substr, font_id.clone(), text_color);
-                        let deleted_x = text_pos.x + prefix_galley.size().x;
+                                let slice_galley = painter.layout_no_wrap(selected_slice.clone(), font_id.clone(), text_color);
+                                let extracted_width = slice_galley.size().x;
+                                let mut close_spring = Spring::new(extracted_width, SpringParams::new(26.0, 0.65));
+                                close_spring.set_target(0.0);
 
-                        state.swipe_anim = Some(TextSwipeAnimation::new_delete(split_char_idx, deleted_substr, del_w, deleted_x));
+                                // Record pull fade-out for the selection overlay
+                                let min_char = byte_offset_to_char_index(self.text, range.start);
+                                let max_char = byte_offset_to_char_index(self.text, range.end);
+                                let cur1 = galley.from_ccursor(egui::text::CCursor::new(min_char));
+                                let cur2 = galley.from_ccursor(egui::text::CCursor::new(max_char));
+                                let r1 = galley.pos_from_cursor(&cur1);
+                                let r2 = galley.pos_from_cursor(&cur2);
+                                let sel_rect = Rect::from_min_max(
+                                    pos2(text_pos.x + r1.left().min(r2.left()), edit_rect.top() + 2.0),
+                                    pos2(text_pos.x + r1.left().max(r2.left()), edit_rect.bottom() - 2.0),
+                                );
+                                let mut pull_spring = Spring::new(1.0, SpringParams::new(26.0, 0.70));
+                                pull_spring.set_target(0.0);
+                                state.pull_fade = Some(PullFade {
+                                    rect: sel_rect,
+                                    color: smoothed_mode_color,
+                                    fade_spring: pull_spring,
+                                });
+
+                                // Immediately extract the text from the buffer and exit Visual mode!
+                                let mut remaining_text = self.text.clone();
+                                safe_replace_range(&mut remaining_text, range.clone(), "");
+                                *self.text = remaining_text.clone();
+                                vbuf.set_text(&remaining_text);
+                                vbuf.anchor = None;
+                                vbuf.cursor = char_index_to_byte_offset(&remaining_text, sel_start_char);
+                                vbuf.mode = VimMode::Insert;
+                                state.swipe_anim = None;
+
+                                display_text = if self.password { "•".repeat(self.text.chars().count()) } else { self.text.clone() };
+                                galley = painter.layout_no_wrap(display_text.clone(), font_id.clone(), text_color);
+                                text_width = galley.size().x;
+
+                                state.drag_selection = Some(DragSelectionState {
+                                    text: selected_slice,
+                                    last_pos: origin_pos,
+                                    grab_offset,
+                                    velocity: egui::Vec2::ZERO,
+                                    target_char_idx: sel_start_char.min(remaining_text.chars().count()),
+                                    split_char_idx: sel_start_char,
+                                    close_spring,
+                                });
+                                ui.ctx().request_repaint();
+                            }
+                        }
+                    }
+
+                    if let Some(ref mut drag_st) = state.drag_selection {
+                        // Dragging selected text: update floating position & target insertion index
+                        if let Some(pos) = pointer_pos {
+                            let dt_safe = dt.max(0.001);
+                            drag_st.velocity = (pos - drag_st.last_pos) / dt_safe;
+                            drag_st.last_pos = pos;
+
+                            let drop_char = pointer_to_char_index(pos, text_pos, &galley, &display_text);
+                            drag_st.target_char_idx = drop_char.min(self.text.chars().count());
+
+                            // Edge autoscroll during drag
+                            if pos.x > edit_rect.right() - 20.0 {
+                                state.scroll_spring.set_target(state.scroll_spring.target + 8.0);
+                            } else if pos.x < edit_rect.left() + 20.0 {
+                                state.scroll_spring.set_target((state.scroll_spring.target - 8.0).max(0.0));
+                            }
+                            ui.ctx().request_repaint();
+                        }
+                    } else {
+                        // Normal click-and-drag: Establish anchor at press origin and expand selection to active pointer
+                        if let (Some(origin_pos), Some(pos)) = (press_origin, pointer_pos) {
+                            let start_char_idx = pointer_to_char_index(origin_pos, text_pos, &galley, &display_text);
+                            let cur_char_idx = pointer_to_char_index(pos, text_pos, &galley, &display_text);
+
+                            if cur_char_idx > start_char_idx {
+                                let start_byte = char_index_to_byte_offset(self.text, start_char_idx);
+                                let last_char_byte = char_index_to_byte_offset(self.text, cur_char_idx.saturating_sub(1));
+                                vbuf.anchor = Some(start_byte);
+                                vbuf.cursor = last_char_byte;
+                                vbuf.mode = VimMode::Visual(VisualType::Character);
+                            } else if cur_char_idx < start_char_idx {
+                                let last_start_byte = char_index_to_byte_offset(self.text, start_char_idx.saturating_sub(1));
+                                let cur_byte = char_index_to_byte_offset(self.text, cur_char_idx);
+                                vbuf.anchor = Some(last_start_byte);
+                                vbuf.cursor = cur_byte;
+                                vbuf.mode = VimMode::Visual(VisualType::Character);
+                            } else {
+                                let cur_byte = char_index_to_byte_offset(self.text, cur_char_idx);
+                                vbuf.anchor = None;
+                                vbuf.cursor = cur_byte;
+                                vbuf.mode = VimMode::Insert;
+                            }
+                            *self.text = vbuf.text().to_owned();
+                            state.selection_fade_spring.reset(1.0);
+
+                            // Edge autoscroll during drag
+                            if pos.x > edit_rect.right() - 20.0 {
+                                state.scroll_spring.set_target(state.scroll_spring.target + 8.0);
+                            } else if pos.x < edit_rect.left() + 20.0 {
+                                state.scroll_spring.set_target((state.scroll_spring.target - 8.0).max(0.0));
+                            }
+                            ui.ctx().request_repaint();
+                        }
+                    }
+                } else if interact_resp.clicked() {
+                    // Single-click: Place caret at exact clicked character index
+                    if let Some(pos) = pointer_pos {
+                        let char_idx = pointer_to_char_index(pos, text_pos, &galley, &display_text);
+                        let byte_offset = char_index_to_byte_offset(self.text, char_idx);
+                        vbuf.cursor = byte_offset;
+                        vbuf.anchor = None;
+                        vbuf.mode = VimMode::Insert;
+                        *self.text = vbuf.text().to_owned();
+                        display_text = if self.password { "•".repeat(self.text.chars().count()) } else { self.text.clone() };
+                        galley = painter.layout_no_wrap(display_text.clone(), font_id.clone(), text_color);
+                        text_width = galley.size().x;
+                        state.drag_selection = None;
                         ui.ctx().request_repaint();
                     }
                 }
-                state.last_text = Some(self.text.clone());
+
+                // Handle drop release on drag stop
+                if state.drag_selection.is_some() && (!ui.input(|i| i.pointer.primary_down()) || interact_resp.drag_stopped()) {
+                    if let Some(drag_st) = state.drag_selection.take() {
+                        let selected_text = drag_st.text;
+                        let target_char = drag_st.target_char_idx.min(self.text.chars().count());
+                        let target_byte = char_index_to_byte_offset(self.text, target_char);
+
+                        let mut new_text = self.text.clone();
+                        new_text.insert_str(target_byte, &selected_text);
+                        let new_range = target_byte..(target_byte + selected_text.len());
+
+                        let dropped_char_count = selected_text.chars().count();
+                        let last_dropped_char_idx = target_char + dropped_char_count.saturating_sub(1);
+                        let last_dropped_byte = char_index_to_byte_offset(&new_text, last_dropped_char_idx);
+
+                        *self.text = new_text.clone();
+                        vbuf.set_text(new_text.as_str());
+                        vbuf.anchor = Some(new_range.start);
+                        vbuf.cursor = last_dropped_byte;
+                        vbuf.mode = VimMode::Visual(VisualType::Character);
+
+                        let mut drop_sel_spring = Spring::new(0.0, SpringParams::new(22.0, 0.60));
+                        drop_sel_spring.set_target(1.0);
+                        state.selection_fade_spring = drop_sel_spring;
+
+                        // Destination baseline landing coordinate from current pre-drop galley layout
+                        let dest_cur = galley.from_ccursor(egui::text::CCursor::new(target_char));
+                        let dest_x = text_pos.x + galley.pos_from_cursor(&dest_cur).left();
+                        let dest_pos = pos2(dest_x, text_pos.y);
+
+                        let slice_galley = painter.layout_no_wrap(selected_text.clone(), font_id.clone(), text_color);
+                        let target_gap_width = slice_galley.size().x;
+
+                        // Refresh layout with newly spliced text for downstream rendering
+                        display_text = if self.password { "•".repeat(self.text.chars().count()) } else { self.text.clone() };
+                        galley = painter.layout_no_wrap(display_text.clone(), font_id.clone(), text_color);
+                        text_width = galley.size().x;
+
+                        // The ghost text position on the final drag frame:
+                        let flight_start_pos = drag_st.last_pos + drag_st.grab_offset;
+
+                        // Launch 2D spring flight from exact ghost release point to dest_pos
+                        state.swipe_anim = None;
+                        state.drop_flight = Some(DropFlightAnim::new(
+                            selected_text,
+                            flight_start_pos,
+                            drag_st.velocity,
+                            dest_pos,
+                            target_char,
+                            target_gap_width,
+                            new_range,
+                        ));
+                        ui.ctx().request_repaint();
+                    }
+                }
+
+                // Determine cursor position in text space for autoscroll calculation
+                let cursor_char_idx = byte_offset_to_char_index(self.text, vbuf.cursor);
+                let cur = galley.from_ccursor(egui::text::CCursor::new(cursor_char_idx));
+                let cursor_local_x = galley.pos_from_cursor(&cur).left();
+
+                // Compute horizontal autoscroll bounds to keep cursor in view
+                let max_scroll = (text_width - view_width + 30.0).max(0.0);
+                if self.focused {
+                    let margin_left = 20.0;
+                    let margin_right = (view_width - 28.0).max(margin_left + 10.0);
+                    let cur_target = state.scroll_spring.target;
+                    let cursor_view_x = cursor_local_x - cur_target;
+
+                    if cursor_view_x < margin_left {
+                        state.scroll_spring.set_target((cursor_local_x - margin_left).max(0.0));
+                    } else if cursor_view_x > margin_right {
+                        state.scroll_spring.set_target((cursor_local_x - margin_right).min(max_scroll));
+                    }
+                    state.scroll_spring.set_target(state.scroll_spring.target.clamp(0.0, max_scroll));
+                }
+
+                state.scroll_spring.update(dt);
+                if !state.scroll_spring.is_settled() {
+                    ui.ctx().request_repaint();
+                }
+
+                // Detect visual text insertion or deletion compared to previous frame's rendered display text (only during keyboard editing)
+                if state.drag_selection.is_none() && state.drop_flight.is_none() {
+                    if let Some(ref last_txt) = state.last_text {
+                        let old_count = last_txt.chars().count();
+                        let new_count = display_text.chars().count();
+                        if new_count > old_count {
+                            // Insertion: characters typed or pasted
+                            let num_inserted = new_count - old_count;
+                            let split_char_idx = cursor_char_idx.saturating_sub(num_inserted);
+                            let inserted_substr: String = display_text.chars().skip(split_char_idx).take(num_inserted).collect();
+                            let ins_galley = painter.layout_no_wrap(inserted_substr.clone(), font_id.clone(), text_color);
+                            let ins_w = ins_galley.size().x.max(7.8);
+                            state.swipe_anim = Some(TextSwipeAnimation::new_insert(split_char_idx, inserted_substr, ins_w));
+                            ui.ctx().request_repaint();
+                        } else if new_count < old_count {
+                            // Deletion: characters deleted (single char, backspace, or visual selection cut)
+                            let num_deleted = old_count - new_count;
+                            let split_char_idx = cursor_char_idx.min(old_count);
+                            let deleted_substr: String = last_txt.chars().skip(split_char_idx).take(num_deleted).collect();
+                            let del_galley = painter.layout_no_wrap(deleted_substr.clone(), font_id.clone(), text_color);
+                            let del_w = del_galley.size().x.max(7.8);
+
+                            // Calculate position where the deleted characters were located
+                            let prefix_substr: String = last_txt.chars().take(split_char_idx).collect();
+                            let prefix_galley = painter.layout_no_wrap(prefix_substr, font_id.clone(), text_color);
+                            let deleted_x = text_pos.x + prefix_galley.size().x;
+
+                            state.swipe_anim = Some(TextSwipeAnimation::new_delete(split_char_idx, deleted_substr, del_w, deleted_x));
+                            ui.ctx().request_repaint();
+                        }
+                    }
+                }
+                state.last_text = Some(display_text.clone());
 
                 // Compute target character rect for the fluid spring cursor based on the CURRENT text and mode
-                let (target_caret_rect, target_rounding, fill_mult, stroke_width) = if self.text.is_empty() {
+                let (target_caret_rect, target_rounding, fill_mult, stroke_width) = if let Some(ref drag_st) = state.drag_selection {
+                    // During text drag-and-drop: The fluid 4-corner cursor glides to the drop insertion target!
+                    let target_char = drag_st.target_char_idx.min(self.text.chars().count());
+                    let target_cur = galley.from_ccursor(egui::text::CCursor::new(target_char));
+                    let base_drop_x = text_pos.x + galley.pos_from_cursor(&target_cur).left();
+                    let drop_x = if target_char > drag_st.split_char_idx {
+                        base_drop_x + drag_st.close_spring.value()
+                    } else {
+                        base_drop_x
+                    };
+
+                    (
+                        Rect::from_min_size(
+                            pos2(drop_x.max(edit_rect.left()), edit_rect.center().y - 8.0),
+                            vec2(2.0, 16.0),
+                        ),
+                        0.5,
+                        1.0,
+                        0.0,
+                    )
+                } else if self.text.is_empty() {
                     let caret_x = match self.align {
                         TextAlign::Left => edit_rect.left(),
                         TextAlign::Center => edit_rect.center().x,
@@ -793,7 +1181,7 @@ impl<'a> TextInput<'a> {
                         ),
                     }
                 } else {
-                    let cursor_char_idx = self.text[..vbuf.cursor.min(self.text.len())].chars().count();
+                    let cursor_char_idx = byte_offset_to_char_index(self.text, vbuf.cursor);
                     let cur = galley.from_ccursor(egui::text::CCursor::new(cursor_char_idx));
                     let cur_rect = galley.pos_from_cursor(&cur);
                     let caret_x = text_pos.x + cur_rect.left();
@@ -889,15 +1277,37 @@ impl<'a> TextInput<'a> {
                                 ),
                             }
                         }
-                        VimMode::Visual(_) => (
-                            Rect::from_min_size(
-                                pos2(caret_x, edit_rect.center().y - 8.0),
-                                vec2(char_w, 16.0),
-                            ),
-                            1.5,
-                            1.0,
-                            1.0,
-                        ),
+                        VimMode::Visual(_) => {
+                            if let Some(anchor_byte) = vbuf.anchor {
+                                let anchor_char_idx = byte_offset_to_char_index(self.text, anchor_byte);
+                                let min_char = anchor_char_idx.min(cursor_char_idx);
+                                let max_char = anchor_char_idx.max(cursor_char_idx);
+                                let min_cur = galley.from_ccursor(egui::text::CCursor::new(min_char));
+                                let min_x = text_pos.x + galley.pos_from_cursor(&min_cur).left();
+                                let max_next_cur = galley.from_ccursor(egui::text::CCursor::new((max_char + 1).min(self.text.chars().count())));
+                                let max_x = text_pos.x + galley.pos_from_cursor(&max_next_cur).left();
+                                let visual_w = (max_x - min_x).max(char_w);
+                                (
+                                    Rect::from_min_size(
+                                        pos2(min_x, edit_rect.center().y - 8.0),
+                                        vec2(visual_w, 16.0),
+                                    ),
+                                    1.5,
+                                    0.55,
+                                    1.5,
+                                )
+                            } else {
+                                (
+                                    Rect::from_min_size(
+                                        pos2(caret_x, edit_rect.center().y - 8.0),
+                                        vec2(char_w, 16.0),
+                                    ),
+                                    1.5,
+                                    1.0,
+                                    1.0,
+                                )
+                            }
+                        }
                     }
                 };
 
@@ -939,19 +1349,31 @@ impl<'a> TextInput<'a> {
                         );
                     }
                 } else {
-                    // Visual selection highlight
-                    if let Some(range) = vbuf.selection_range() {
-                        let min_char = self.text[..range.start.min(self.text.len())].chars().count();
-                        let max_char = self.text[..range.end.min(self.text.len())].chars().count();
-                        let cur1 = galley.from_ccursor(egui::text::CCursor::new(min_char));
-                        let cur2 = galley.from_ccursor(egui::text::CCursor::new(max_char));
-                        let r1 = galley.pos_from_cursor(&cur1);
-                        let r2 = galley.pos_from_cursor(&cur2);
-                        let sel_rect = Rect::from_min_max(
-                            pos2(text_pos.x + r1.left().min(r2.left()), edit_rect.top() + 2.0),
-                            pos2(text_pos.x + r1.left().max(r2.left()), edit_rect.bottom() - 2.0),
-                        );
-                        painter.rect_filled(sel_rect, Rounding::same(2.0), smoothed_mode_color.linear_multiply(0.25));
+                    // Visual selection highlight with smooth fade-out on pull and fade-in on drop landing
+                    if let Some(ref pull) = state.pull_fade {
+                        let pull_alpha = pull.fade_spring.value().clamp(0.0, 1.0);
+                        if pull_alpha > 0.01 {
+                            painter.rect_filled(pull.rect, Rounding::same(2.0), pull.color.linear_multiply(0.25 * pull_alpha));
+                        }
+                    }
+
+                    if state.drag_selection.is_none() {
+                        if let Some(range) = vbuf.selection_range() {
+                            let min_char = byte_offset_to_char_index(self.text, range.start);
+                            let max_char = byte_offset_to_char_index(self.text, range.end);
+                            let cur1 = galley.from_ccursor(egui::text::CCursor::new(min_char));
+                            let cur2 = galley.from_ccursor(egui::text::CCursor::new(max_char));
+                            let r1 = galley.pos_from_cursor(&cur1);
+                            let r2 = galley.pos_from_cursor(&cur2);
+                            let sel_rect = Rect::from_min_max(
+                                pos2(text_pos.x + r1.left().min(r2.left()), edit_rect.top() + 2.0),
+                                pos2(text_pos.x + r1.left().max(r2.left()), edit_rect.bottom() - 2.0),
+                            );
+                            let sel_alpha = state.selection_fade_spring.value().clamp(0.0, 1.0);
+                            if sel_alpha > 0.01 {
+                                painter.rect_filled(sel_rect, Rounding::same(2.0), smoothed_mode_color.linear_multiply(0.25 * sel_alpha));
+                            }
+                        }
                     }
 
                     // Render Base Text with dynamic caret-driven swipe reveal and trailing slide
@@ -1039,6 +1461,55 @@ impl<'a> TextInput<'a> {
                         } else {
                             painter.galley(text_pos, galley.clone(), text_color);
                         }
+                    } else if let Some(ref drag_st) = state.drag_selection {
+                        // While pulling / dragging text:
+                        // Characters on the right (split_char_idx..) smoothly slide left from close_spring.value() to 0.0 to close the gap!
+                        let start_char = drag_st.split_char_idx;
+
+                        // 1. Prefix (0..start_char)
+                        let prefix_str: String = display_text.chars().take(start_char).collect();
+                        let prefix_w = if !prefix_str.is_empty() {
+                            let prefix_galley = painter.layout_no_wrap(prefix_str, font_id.clone(), text_color);
+                            let pw = prefix_galley.size().x;
+                            painter.galley(text_pos, prefix_galley, text_color);
+                            pw
+                        } else {
+                            0.0
+                        };
+
+                        // 2. Suffix (start_char..) shifted right by close_spring.value() (animating extracted_width -> 0.0)
+                        let suffix_str: String = display_text.chars().skip(start_char).collect();
+                        if !suffix_str.is_empty() {
+                            let shift_offset = drag_st.close_spring.value();
+                            let suffix_x = text_pos.x + prefix_w + shift_offset;
+                            let suffix_galley = painter.layout_no_wrap(suffix_str, font_id.clone(), text_color);
+                            painter.galley(pos2(suffix_x, text_pos.y), suffix_galley, text_color);
+                        }
+                    } else if let Some(ref flight) = state.drop_flight {
+                        // While drop flight is in progress:
+                        // Suffix smoothly parts open to make room for incoming text using gap_spring!
+                        let start_char = flight.split_char_idx;
+                        let num_chars = flight.text.chars().count();
+
+                        // 1. Prefix (0..start_char)
+                        let prefix_str: String = display_text.chars().take(start_char).collect();
+                        let prefix_w = if !prefix_str.is_empty() {
+                            let prefix_galley = painter.layout_no_wrap(prefix_str, font_id.clone(), text_color);
+                            let pw = prefix_galley.size().x;
+                            painter.galley(text_pos, prefix_galley, text_color);
+                            pw
+                        } else {
+                            0.0
+                        };
+
+                        // 2. Suffix (start_char + num_chars..) parts open rightward by gap_spring.value()
+                        let suffix_str: String = display_text.chars().skip(start_char + num_chars).collect();
+                        if !suffix_str.is_empty() {
+                            let gap_offset = flight.gap_spring.value();
+                            let suffix_x = text_pos.x + prefix_w + gap_offset;
+                            let suffix_galley = painter.layout_no_wrap(suffix_str, font_id.clone(), text_color);
+                            painter.galley(pos2(suffix_x, text_pos.y), suffix_galley, text_color);
+                        }
                     } else {
                         // Fully settled: 100% stable single galley
                         painter.galley(text_pos, galley.clone(), text_color);
@@ -1053,7 +1524,7 @@ impl<'a> TextInput<'a> {
                 // High-Contrast Character Inversion:
                 // For solid block modes (Normal, Visual, OperatorPending Delete/Change), re-render the character
                 // intersecting the cursor polygon using inverted palette.crust foreground text on top of the solid block!
-                if self.focused && !self.text.is_empty() && (mode == VimMode::Normal || mode.is_operator_pending() || mode.is_visual()) && fill_mult >= 0.8 {
+                if state.drop_flight.is_none() && state.drag_selection.is_none() && self.focused && !self.text.is_empty() && (mode == VimMode::Normal || mode.is_operator_pending() || mode.is_visual()) && fill_mult >= 0.8 {
                     let inverted_text_color = if let Some(p) = self.palette {
                         p.crust
                     } else {
@@ -1072,12 +1543,70 @@ impl<'a> TextInput<'a> {
                     );
 
                     let inv_painter = ui.painter().with_clip_rect(cursor_clip.intersect(edit_rect));
-                    let inv_galley = inv_painter.layout_no_wrap(display_text, font_id.clone(), inverted_text_color);
+                    let inv_galley = inv_painter.layout_no_wrap(display_text.clone(), font_id.clone(), inverted_text_color);
                     inv_painter.galley(text_pos, inv_galley, inverted_text_color);
+                }
+
+                // 2. Render Floating Drag Ghost attached to mouse pointer on TOP layer (above all sections/panels)
+                if let Some(ref drag_st) = state.drag_selection {
+                    let overlay_painter = ui.ctx().layer_painter(LayerId::new(
+                        Order::Tooltip,
+                        ui.id().with("drag_ghost_overlay"),
+                    ));
+                    let ghost_text_pos = drag_st.last_pos + drag_st.grab_offset;
+                    let ghost_galley = overlay_painter.layout_no_wrap(
+                        drag_st.text.clone(),
+                        font_id.clone(),
+                        if let Some(p) = self.palette { p.text } else { Color32::WHITE },
+                    );
+                    let pill_rect = Rect::from_min_size(
+                        pos2(ghost_text_pos.x - 6.0, ghost_text_pos.y - 3.0),
+                        vec2(ghost_galley.size().x + 12.0, ghost_galley.size().y + 6.0),
+                    );
+                    let ghost_bg = if let Some(p) = self.palette {
+                        p.surface1.linear_multiply(0.95)
+                    } else {
+                        Color32::from_black_alpha(220)
+                    };
+                    overlay_painter.add(Shape::rect_filled(pill_rect, Rounding::same(4.0), ghost_bg));
+                    overlay_painter.add(Shape::rect_stroke(pill_rect, Rounding::same(4.0), Stroke::new(1.5, smoothed_mode_color)));
+                    overlay_painter.galley(ghost_text_pos, ghost_galley, if let Some(p) = self.palette { p.text } else { Color32::WHITE });
+                }
+
+                // 3. Render 2D Spring Flight for dropped text docking into place on TOP layer
+                if let Some(ref flight) = state.drop_flight {
+                    let overlay_painter = ui.ctx().layer_painter(LayerId::new(
+                        Order::Tooltip,
+                        ui.id().with("drop_flight_overlay"),
+                    ));
+                    let flight_x = flight.x_spring.value();
+                    let flight_y = flight.y_spring.value();
+                    let flight_scale = flight.scale_spring.value();
+                    let flight_galley = overlay_painter.layout_no_wrap(
+                        flight.text.clone(),
+                        font_id.clone(),
+                        if let Some(p) = self.palette { p.text } else { Color32::WHITE },
+                    );
+                    let pill_rect = Rect::from_min_size(
+                        pos2(flight_x - 6.0, flight_y - 3.0),
+                        vec2((flight_galley.size().x + 12.0) * flight_scale, (flight_galley.size().y + 6.0) * flight_scale),
+                    );
+                    let dist = (pos2(flight_x, flight_y) - flight.dest_pos).length();
+                    let fade = (dist / 35.0).clamp(0.0, 1.0);
+                    let flight_bg = if let Some(p) = self.palette {
+                        p.surface1.linear_multiply(0.95 * fade)
+                    } else {
+                        Color32::from_black_alpha((220.0 * fade) as u8)
+                    };
+                    if fade > 0.05 {
+                        overlay_painter.add(Shape::rect_filled(pill_rect, Rounding::same(4.0), flight_bg));
+                        overlay_painter.add(Shape::rect_stroke(pill_rect, Rounding::same(4.0), Stroke::new(1.5 * fade, smoothed_mode_color.linear_multiply(fade))));
+                    }
+                    overlay_painter.galley(pos2(flight_x, flight_y), flight_galley, if let Some(p) = self.palette { p.text } else { Color32::WHITE });
                 }
             }
 
-            resp
+            interact_resp
         } else {
             // Standard egui::TextEdit fallback for non-Vim text inputs
             let mut edit = TextEdit::singleline(self.text)
@@ -1218,4 +1747,90 @@ pub fn resolve_vim_mode_color(
 /// This is a re-export of [`egui_themes::lerp_color`] for backward compatibility.
 pub fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
     egui_themes::lerp_color(a, b, t)
+}
+
+#[inline]
+fn pointer_to_char_index(
+    pointer_pos: egui::Pos2,
+    text_pos: egui::Pos2,
+    galley: &egui::Galley,
+    display_text: &str,
+) -> usize {
+    let local_vec = egui::vec2(pointer_pos.x - text_pos.x, 4.0);
+    let ccursor = galley.cursor_from_pos(local_vec).ccursor;
+    ccursor.index.min(display_text.chars().count())
+}
+
+#[inline]
+fn byte_offset_to_char_index(text: &str, byte_offset: usize) -> usize {
+    text.char_indices().take_while(|(b, _)| *b < byte_offset).count()
+}
+
+#[inline]
+fn safe_byte_slice(text: &str, range: std::ops::Range<usize>) -> &str {
+    let start = text.char_indices().map(|(b, _)| b).find(|&b| b >= range.start).unwrap_or(text.len());
+    let end = text.char_indices().map(|(b, _)| b).find(|&b| b >= range.end).unwrap_or(text.len());
+    if start <= end && end <= text.len() {
+        &text[start..end]
+    } else {
+        ""
+    }
+}
+
+#[inline]
+fn safe_replace_range(text: &mut String, range: std::ops::Range<usize>, replacement: &str) {
+    let start = text.char_indices().map(|(b, _)| b).find(|&b| b >= range.start).unwrap_or(text.len());
+    let end = text.char_indices().map(|(b, _)| b).find(|&b| b >= range.end).unwrap_or(text.len());
+    if start <= end && end <= text.len() {
+        text.replace_range(start..end, replacement);
+    }
+}
+
+#[inline]
+fn char_index_to_byte_offset(text: &str, char_idx: usize) -> usize {
+    text.char_indices()
+        .nth(char_idx)
+        .map(|(idx, _)| idx)
+        .unwrap_or(text.len())
+}
+
+fn word_bounds_around_byte(text: &str, byte_offset: usize) -> (usize, usize) {
+    if text.is_empty() {
+        return (0, 0);
+    }
+    let clamped_offset = byte_offset.min(text.len());
+    let char_indices: Vec<(usize, char)> = text.char_indices().collect();
+    if char_indices.is_empty() {
+        return (0, 0);
+    }
+    let target_idx = char_indices
+        .iter()
+        .position(|&(b, _)| b >= clamped_offset)
+        .unwrap_or(char_indices.len().saturating_sub(1));
+    let is_word_char = |c: char| c.is_alphanumeric() || c == '_';
+    let target_is_word = is_word_char(char_indices[target_idx].1);
+
+    let mut start_idx = target_idx;
+    while start_idx > 0
+        && is_word_char(char_indices[start_idx - 1].1) == target_is_word
+        && !char_indices[start_idx - 1].1.is_whitespace()
+    {
+        start_idx -= 1;
+    }
+
+    let mut end_idx = target_idx;
+    while end_idx + 1 < char_indices.len()
+        && is_word_char(char_indices[end_idx + 1].1) == target_is_word
+        && !char_indices[end_idx + 1].1.is_whitespace()
+    {
+        end_idx += 1;
+    }
+
+    let start_byte = char_indices[start_idx].0;
+    let end_byte = if end_idx + 1 < char_indices.len() {
+        char_indices[end_idx + 1].0
+    } else {
+        text.len()
+    };
+    (start_byte, end_byte)
 }

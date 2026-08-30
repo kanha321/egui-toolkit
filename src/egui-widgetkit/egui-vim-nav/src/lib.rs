@@ -31,7 +31,7 @@ pub mod vim_buffer;
 pub use cursor_autohide::{is_cursor_hidden, is_hover_active, CursorAutohide};
 pub use focus_graph::{BranchGroup, BranchStrategy, Direction, FocusGraph, Neighbors};
 pub use hierarchical_nav::{hierarchical_move, HierarchicalNavResult};
-pub use key_handler::{VimAction, VimKeyHandler};
+pub use key_handler::{ActionTracker, VimAction, VimActionState, VimKeyHandler};
 pub use modal_text::{check_modal_transition, FocusLevel, ModalTransition};
 pub use navigator::{FocusEvent, FocusWrap, Navigator};
 pub use register::{FocusRegion, FocusRegionResponse};

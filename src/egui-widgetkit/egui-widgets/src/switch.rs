@@ -9,7 +9,7 @@
 //! [`SwitchState`] struct (`CODING_RULES §2`).
 
 use egui::{
-    pos2, vec2, Color32, Id, Rect, Response, Rounding, Sense, Shape, Stroke, TextStyle, Ui,
+    pos2, vec2, Color32, Id, Rect, Rounding, Sense, Shape, Stroke, TextStyle, Ui,
     WidgetText,
 };
 use egui_themes::ThemePalette;
@@ -41,23 +41,98 @@ impl SwitchSize {
     }
 }
 
+/// Response returned by [`Switch::show`] providing standard egui interaction methods
+/// alongside fine-grained lifecycle querying (`clicked`, `is_pressed`, `is_held`, `changed`).
+#[derive(Clone, Debug)]
+pub struct SwitchResponse {
+    /// The underlying [`egui::Response`].
+    pub response: egui::Response,
+    /// Whether the switch is currently pressed / held down (mouse or keyboard).
+    pub is_pressed: bool,
+    /// Standard click action: fired strictly on release.
+    pub clicked: bool,
+}
+
+impl SwitchResponse {
+    /// Returns `true` if the switch was clicked on release.
+    #[inline]
+    pub fn clicked(&self) -> bool {
+        self.clicked
+    }
+
+    /// Returns `true` while the switch is currently pressed down.
+    #[inline]
+    pub fn is_pressed(&self) -> bool {
+        self.is_pressed
+    }
+
+    /// Returns `true` while the switch is currently held down (alias for `is_pressed`).
+    #[inline]
+    pub fn is_held(&self) -> bool {
+        self.is_pressed
+    }
+
+    /// Returns `true` if the switch value changed this frame.
+    #[inline]
+    pub fn changed(&self) -> bool {
+        self.response.changed()
+    }
+
+    /// Unwraps and returns the inner [`egui::Response`].
+    #[inline]
+    pub fn into_inner(self) -> egui::Response {
+        self.response
+    }
+}
+
+impl std::ops::Deref for SwitchResponse {
+    type Target = egui::Response;
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.response
+    }
+}
+
+impl std::ops::DerefMut for SwitchResponse {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.response
+    }
+}
+
+impl From<SwitchResponse> for egui::Response {
+    #[inline]
+    fn from(r: SwitchResponse) -> Self {
+        r.response
+    }
+}
+
 /// Persistent animation state for spring-driven toggle switches.
 #[derive(Clone, Debug)]
 pub struct SwitchState {
     /// Spring driving thumb horizontal translation ($0.0 \to 1.0$).
     pub thumb_spring: Spring,
-    /// Spring driving track hover expansion / brightness ($0.0 \to 1.0$).
+    /// Spring driving track hover/focus highlight ($0.0 \to 1.0$).
     pub hover_spring: Spring,
     /// Critically damped spring driving smooth track background crossfade ($0.0 \to 1.0$).
     pub color_spring: Spring,
+    /// Spring driving press compression and pop rebound ($0.0 \to 1.0$).
+    pub press_spring: Spring,
+    /// Spring driving instantaneous organic expand-and-shrink focus bounce ($0.0 \to 0.0$).
+    pub focus_spring: Spring,
+    /// Tracks previous frame's focus state to detect focus entrance.
+    pub was_focused: bool,
 }
 
 impl Default for SwitchState {
     fn default() -> Self {
         Self {
             thumb_spring: Spring::new(0.0, SpringParams::new(26.0, 0.46)),
-            hover_spring: Spring::new(0.0, SpringParams::new(24.0, 0.50)),
+            hover_spring: Spring::new(0.0, SpringParams::new(18.0, 0.48)),
             color_spring: Spring::new(0.0, SpringParams::new(14.0, 1.0)),
+            press_spring: Spring::new(0.0, SpringParams::new(14.0, 0.42)),
+            focus_spring: Spring::new(0.0, SpringParams::new(18.0, 0.30)),
+            was_focused: false,
         }
     }
 }
@@ -68,25 +143,61 @@ impl SwitchState {
         let initial_val = if is_on { 1.0 } else { 0.0 };
         Self {
             thumb_spring: Spring::new(initial_val, SpringParams::new(26.0, 0.46)),
-            hover_spring: Spring::new(0.0, SpringParams::new(24.0, 0.50)),
+            hover_spring: Spring::new(0.0, SpringParams::new(18.0, 0.48)),
             color_spring: Spring::new(initial_val, SpringParams::new(14.0, 1.0)),
+            press_spring: Spring::new(0.0, SpringParams::new(14.0, 0.42)),
+            focus_spring: Spring::new(0.0, SpringParams::new(18.0, 0.30)),
+            was_focused: false,
         }
     }
 
+    /// Triggers an immediate smooth focus jiggle impulse.
+    pub fn trigger_focus_bounce(&mut self) {
+        self.focus_spring.current = 0.0;
+        self.focus_spring.velocity = 20.0;
+        self.focus_spring.set_target(0.0);
+    }
+
+    /// Triggers an elastic pop animation on toggle click release.
+    pub fn trigger_click(&mut self, is_on: bool) {
+        self.thumb_spring.velocity = if is_on { 18.0 } else { -18.0 };
+        self.press_spring.velocity = (self.press_spring.velocity + 16.0).min(20.0);
+        self.press_spring.set_target(0.0);
+        self.thumb_spring.set_target(if is_on { 1.0 } else { 0.0 });
+    }
+
     /// Updates internal springs and requests repaint if in motion.
-    pub fn update(&mut self, dt: f32, is_on: bool, is_hovered: bool, clicked: bool, ctx: &egui::Context) {
-        self.hover_spring.set_target(if is_hovered { 1.0 } else { 0.0 });
+    pub fn update(
+        &mut self,
+        dt: f32,
+        is_on: bool,
+        is_focused: bool,
+        is_pressed: bool,
+        clicked: bool,
+        ctx: &egui::Context,
+    ) {
+        if is_focused && !self.was_focused {
+            self.trigger_focus_bounce();
+        }
+        self.was_focused = is_focused;
+
+        self.hover_spring.set_target(if is_focused { 1.0 } else { 0.0 });
         self.color_spring.set_target(if is_on { 1.0 } else { 0.0 });
-        if clicked {
-            self.thumb_spring.velocity = if is_on { 18.0 } else { -18.0 };
-            self.thumb_spring.set_target(if is_on { 1.0 } else { 0.0 });
+
+        if is_pressed {
+            self.press_spring.set_target(1.0);
+        } else if clicked {
+            self.trigger_click(is_on);
         } else {
+            self.press_spring.set_target(0.0);
             self.thumb_spring.set_target(if is_on { 1.0 } else { 0.0 });
         }
 
         self.thumb_spring.update(dt);
         self.hover_spring.update(dt);
         self.color_spring.update(dt);
+        self.press_spring.update(dt);
+        self.focus_spring.update(dt);
 
         if !self.is_settled() {
             ctx.request_repaint();
@@ -95,7 +206,11 @@ impl SwitchState {
 
     /// Returns `true` if all motion springs have reached target equilibrium.
     pub fn is_settled(&self) -> bool {
-        self.thumb_spring.is_settled() && self.hover_spring.is_settled() && self.color_spring.is_settled()
+        self.thumb_spring.is_settled()
+            && self.hover_spring.is_settled()
+            && self.color_spring.is_settled()
+            && self.press_spring.is_settled()
+            && self.focus_spring.is_settled()
     }
 }
 
@@ -130,6 +245,7 @@ pub struct Switch<'a> {
     external_state: Option<&'a mut SwitchState>,
     focused: bool,
     triggered: bool,
+    pressed: bool,
 }
 
 impl<'a> Switch<'a> {
@@ -153,6 +269,7 @@ impl<'a> Switch<'a> {
             external_state: None,
             focused: false,
             triggered: false,
+            pressed: false,
         }
     }
 
@@ -255,7 +372,13 @@ impl<'a> Switch<'a> {
         self
     }
 
-    /// Explicitly triggers a toggle action this frame (e.g. from Enter/Space/F key).
+    /// Explicitly marks the switch as pressed / held down.
+    pub fn pressed(mut self, pressed: bool) -> Self {
+        self.pressed = pressed;
+        self
+    }
+
+    /// Explicitly triggers a toggle action this frame (e.g. from Enter/Space/F key release).
     pub fn triggered(mut self, triggered: bool) -> Self {
         self.triggered = triggered;
         self
@@ -268,7 +391,7 @@ impl<'a> Switch<'a> {
     }
 
     /// Renders the toggle switch and updates `selected` upon interaction.
-    pub fn show(self, ui: &mut Ui) -> Response {
+    pub fn show(self, ui: &mut Ui) -> SwitchResponse {
         let (track_w, track_h, thumb_r) = self.size.dimensions();
         let track_size = vec2(track_w, track_h);
 
@@ -289,7 +412,27 @@ impl<'a> Switch<'a> {
 
         let (rect, mut response) = ui.allocate_exact_size(total_size, Sense::click());
 
-        let is_clicked = response.clicked() || self.triggered;
+        let is_focused = self.focused || response.has_focus();
+        let (is_key_down, is_key_released) = if is_focused {
+            ui.input(|i| {
+                if i.modifiers.ctrl || i.modifiers.alt {
+                    (false, false)
+                } else {
+                    let down = i.key_down(egui::Key::F) || i.key_down(egui::Key::Enter) || i.key_down(egui::Key::Space);
+                    let released = i.key_released(egui::Key::F) || i.key_released(egui::Key::Enter) || i.key_released(egui::Key::Space);
+                    (down, released)
+                }
+            })
+        } else {
+            (false, false)
+        };
+
+        let is_pressed = self.pressed
+            || (is_focused && (is_key_down || ui.input(|i| i.pointer.primary_down())))
+            || response.is_pointer_button_down_on();
+        let is_clicked = self.triggered
+            || (is_focused && is_key_released)
+            || response.clicked();
         if is_clicked {
             *self.selected = !*self.selected;
             response.mark_changed();
@@ -320,16 +463,17 @@ impl<'a> Switch<'a> {
 
         // Motion physics: hover is driven strictly by focus
         let dt = ui.input(|i| i.stable_dt).min(0.05);
-        let is_hovered = self.focused;
         let is_on = *self.selected;
 
-        let (thumb_progress, hover_factor, color_progress) = if self.motion {
+        let (thumb_progress, hover_factor, color_progress, press_factor, focus_bounce) = if self.motion {
             if let Some(state) = self.external_state {
-                state.update(dt, is_on, is_hovered, is_clicked, ui.ctx());
+                state.update(dt, is_on, is_focused, is_pressed, is_clicked, ui.ctx());
                 (
                     state.thumb_spring.value(),
                     state.hover_spring.value(),
                     state.color_spring.value(),
+                    state.press_spring.value(),
+                    state.focus_spring.value(),
                 )
             } else {
                 let id = self.id_source.unwrap_or_else(|| {
@@ -343,11 +487,13 @@ impl<'a> Switch<'a> {
                     d.get_temp(id).unwrap_or_else(|| SwitchState::new(is_on))
                 });
 
-                state.update(dt, is_on, is_hovered, is_clicked, ui.ctx());
+                state.update(dt, is_on, is_focused, is_pressed, is_clicked, ui.ctx());
                 let values = (
                     state.thumb_spring.value(),
                     state.hover_spring.value(),
                     state.color_spring.value(),
+                    state.press_spring.value(),
+                    state.focus_spring.value(),
                 );
                 ui.data_mut(|d| d.insert_temp(id, state));
                 values
@@ -355,49 +501,60 @@ impl<'a> Switch<'a> {
         } else {
             (
                 if is_on { 1.0 } else { 0.0 },
-                if is_hovered { 1.0 } else { 0.0 },
+                if is_focused { 1.0 } else { 0.0 },
                 if is_on { 1.0 } else { 0.0 },
+                if is_pressed { 1.0 } else { 0.0 },
+                0.0,
             )
         };
 
         if ui.is_rect_visible(rect) {
             let painter = ui.painter();
 
-            // Track positioning
-            let track_rect = Rect::from_min_size(
-                pos2(rect.left(), rect.center().y - track_h * 0.5),
-                track_size,
+            // Track positioning with smooth press depression & squash-and-stretch focus jiggle
+            let track_y_sink = press_factor * 1.5;
+            let scale_x = (1.0 + (focus_bounce * 0.12) - (press_factor * 0.08)).max(0.70);
+            let scale_y = (1.0 - (focus_bounce * 0.07) - (press_factor * 0.12)).max(0.70);
+            let scaled_track_size = vec2(track_size.x * scale_x, track_size.y * scale_y);
+            let track_center = pos2(
+                rect.left() + track_size.x * 0.5,
+                rect.center().y + track_y_sink,
             );
-            let track_rounding = Rounding::same(track_h * 0.5);
+            let track_rect = Rect::from_center_size(track_center, scaled_track_size);
+            let track_rounding = Rounding::same(scaled_track_size.y * 0.5);
 
             // Interpolate track fill smoothly via dedicated color crossfade
             let base_track_fill = lerp_color(track_off, track_on, color_progress.clamp(0.0, 1.0));
             let final_track_fill = if hover_factor > 0.01 {
-                base_track_fill.linear_multiply(1.0 + hover_factor.clamp(0.0, 1.0) * 0.15)
+                base_track_fill.linear_multiply(1.0 + hover_factor.clamp(0.0, 1.0) * 0.10)
             } else {
                 base_track_fill
             };
 
-            // Paint track
+            // Paint track — clean base stroke, no added focus outline
             painter.add(Shape::rect_filled(track_rect, track_rounding, final_track_fill));
             if track_stroke.width > 0.0 {
                 painter.add(Shape::rect_stroke(track_rect, track_rounding, track_stroke));
             }
 
             // Thumb calculation with overshoot and elastic dynamic squash & stretch
-            let min_x = track_rect.left() + track_h * 0.5;
-            let max_x = track_rect.right() - track_h * 0.5;
+            let min_x = track_rect.left() + track_rect.height() * 0.5;
+            let max_x = track_rect.right() - track_rect.height() * 0.5;
             let travel_distance = max_x - min_x;
             let thumb_x = min_x + thumb_progress * travel_distance;
             let thumb_center = pos2(thumb_x, track_rect.center().y);
 
             let thumb_color = lerp_color(thumb_off, thumb_on, color_progress.clamp(0.0, 1.0));
 
-            // Dynamic elastic squash along movement axis
+            // Dynamic elastic squash along movement axis & press compression
             let target_val = if is_on { 1.0 } else { 0.0 };
-            let stretch_factor = (thumb_progress - target_val).abs().min(0.5) * 0.40;
-            let thumb_w = thumb_r * (1.0 + stretch_factor);
-            let thumb_h_rad = thumb_r * (1.0 - stretch_factor * 0.4);
+            let motion_stretch = (thumb_progress - target_val).abs().min(0.5) * 0.40;
+            let press_stretch = press_factor * 0.25;
+            let total_w_factor = 1.0 + motion_stretch + press_stretch;
+            let total_h_factor = (1.0 - motion_stretch * 0.4 - press_factor * 0.15).max(0.65);
+
+            let thumb_w = thumb_r * scale_x * total_w_factor;
+            let thumb_h_rad = thumb_r * scale_y * total_h_factor;
             let thumb_rect = Rect::from_center_size(thumb_center, vec2(thumb_w * 2.0, thumb_h_rad * 2.0));
 
             // Paint thumb knob
@@ -406,17 +563,30 @@ impl<'a> Switch<'a> {
                 painter.add(Shape::rect_stroke(thumb_rect, Rounding::same(thumb_h_rad), stroke));
             }
 
-            // Paint optional label
+            // Paint optional label with smooth contrast glide on focus
             if let Some(ref lg) = label_galley {
                 let label_pos = pos2(
-                    track_rect.right() + 8.0,
+                    rect.left() + track_size.x + 8.0,
                     rect.center().y - lg.size().y * 0.5,
                 );
-                painter.galley(label_pos, lg.clone(), label_color);
+                let final_label_color = if hover_factor > 0.01 {
+                    if let Some(p) = self.palette {
+                        lerp_color(label_color, p.text, hover_factor.clamp(0.0, 1.0))
+                    } else {
+                        label_color
+                    }
+                } else {
+                    label_color
+                };
+                painter.galley(label_pos, lg.clone(), final_label_color);
             }
         }
 
-        response
+        SwitchResponse {
+            response,
+            is_pressed,
+            clicked: is_clicked,
+        }
     }
 }
 

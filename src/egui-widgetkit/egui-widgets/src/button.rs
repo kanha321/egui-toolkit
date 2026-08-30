@@ -1,6 +1,6 @@
 //! Spring-animated, theme-aware button controls.
 //!
-//! Provides [`Button`] and [`IconButton`] with spring-driven press feedback, smooth hover
+//! Provides [`Button`] with spring-driven press feedback, smooth hover
 //! luminance morphing, multiple semantic variants, and full developer customization.
 //!
 //! # State Ownership
@@ -9,7 +9,7 @@
 //! [`ButtonState`] struct passed via [`.with_state()`](Button::with_state) (`CODING_RULES §2`).
 
 use egui::{
-    vec2, Color32, Id, Rect, Response, Rounding, Sense, Shape, Stroke, TextStyle,
+    vec2, Color32, Id, Rect, Rounding, Sense, Shape, Stroke, TextStyle,
     Ui, Vec2, WidgetText,
 };
 use egui_themes::ThemePalette;
@@ -61,6 +61,66 @@ impl ButtonSize {
     }
 }
 
+/// Response returned by [`Button::show`] providing standard egui interaction methods
+/// alongside fine-grained lifecycle querying (`clicked`, `is_pressed`, `is_held`).
+#[derive(Clone, Debug)]
+pub struct ButtonResponse {
+    /// The underlying [`egui::Response`].
+    pub response: egui::Response,
+    /// Whether the button is currently pressed down (mouse or keyboard).
+    pub is_pressed: bool,
+    /// Standard click action: fired strictly on release.
+    pub clicked: bool,
+}
+
+impl ButtonResponse {
+    /// Returns `true` if the button was clicked on release.
+    #[inline]
+    pub fn clicked(&self) -> bool {
+        self.clicked
+    }
+
+    /// Returns `true` while the button is currently pressed down.
+    #[inline]
+    pub fn is_pressed(&self) -> bool {
+        self.is_pressed
+    }
+
+    /// Returns `true` while the button is currently held down (alias for `is_pressed`).
+    #[inline]
+    pub fn is_held(&self) -> bool {
+        self.is_pressed
+    }
+
+    /// Unwraps and returns the inner [`egui::Response`].
+    #[inline]
+    pub fn into_inner(self) -> egui::Response {
+        self.response
+    }
+}
+
+impl std::ops::Deref for ButtonResponse {
+    type Target = egui::Response;
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.response
+    }
+}
+
+impl std::ops::DerefMut for ButtonResponse {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.response
+    }
+}
+
+impl From<ButtonResponse> for egui::Response {
+    #[inline]
+    fn from(r: ButtonResponse) -> Self {
+        r.response
+    }
+}
+
 /// Persistent animation state for spring-driven button interactions.
 ///
 /// Can be owned directly by the caller or stored in egui ID temporary storage.
@@ -70,6 +130,16 @@ pub struct ButtonState {
     pub press_spring: Spring,
     /// Spring driving smooth hover glow/luminance transition ($0.0 \to 1.0$).
     pub hover_spring: Spring,
+    /// Spring driving instantaneous organic expand-and-shrink hover/focus bounce ($0.0 \to 0.0$).
+    pub hover_bounce_spring: Spring,
+    /// Spring driving smooth width size transitions when text/content changes.
+    pub width_spring: Spring,
+    /// Spring driving smooth height size transitions when content changes.
+    pub height_spring: Spring,
+    /// Tracks previous frame's hover/focus state to detect entrance.
+    pub was_hovered: bool,
+    /// Whether size springs have been initialized with the initial content size.
+    pub size_initialized: bool,
 }
 
 impl Default for ButtonState {
@@ -77,20 +147,50 @@ impl Default for ButtonState {
         Self {
             press_spring: Spring::new(0.0, SpringParams::new(14.0, 0.42)),
             hover_spring: Spring::new(0.0, SpringParams::new(20.0, 0.55)),
+            hover_bounce_spring: Spring::new(0.0, SpringParams::new(18.0, 0.30)),
+            width_spring: Spring::new(0.0, SpringParams::new(26.0, 0.58)),
+            height_spring: Spring::new(0.0, SpringParams::new(26.0, 0.58)),
+            was_hovered: false,
+            size_initialized: false,
         }
     }
 }
 
 impl ButtonState {
-    /// Fires an authentic, continuous squash-and-rebound pop animation without position snapping.
+    /// Creates a new default button state.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Triggers an elastic squash-and-rebound pop animation on click release.
     pub fn trigger_click(&mut self) {
-        self.press_spring.velocity = (self.press_spring.velocity + 18.0).min(24.0);
+        self.press_spring.velocity = 18.0;
         self.press_spring.set_target(0.0);
     }
 
+    /// Triggers an instantaneous size bounce impulse on hover/focus arrival.
+    pub fn trigger_hover_bounce(&mut self) {
+        self.hover_bounce_spring.current = 0.0;
+        self.hover_bounce_spring.velocity = 20.0;
+        self.hover_bounce_spring.set_target(0.0);
+    }
+
     /// Updates the button's internal springs and requests repaint if still moving.
-    pub fn update(&mut self, dt: f32, is_hovered: bool, is_pressed: bool, clicked: bool, ctx: &egui::Context) {
+    pub fn update(
+        &mut self,
+        dt: f32,
+        is_hovered: bool,
+        is_pressed: bool,
+        clicked: bool,
+        ctx: &egui::Context,
+    ) {
+        if is_hovered && !self.was_hovered {
+            self.trigger_hover_bounce();
+        }
+        self.was_hovered = is_hovered;
+
         self.hover_spring.set_target(if is_hovered { 1.0 } else { 0.0 });
+
         if is_pressed {
             self.press_spring.set_target(1.0);
         } else if clicked {
@@ -100,6 +200,7 @@ impl ButtonState {
         }
 
         self.hover_spring.update(dt);
+        self.hover_bounce_spring.update(dt);
         self.press_spring.update(dt);
 
         if !self.is_settled() {
@@ -109,7 +210,11 @@ impl ButtonState {
 
     /// Returns `true` if all motion springs have settled within tolerance.
     pub fn is_settled(&self) -> bool {
-        self.hover_spring.is_settled() && self.press_spring.is_settled()
+        self.hover_spring.is_settled()
+            && self.hover_bounce_spring.is_settled()
+            && self.press_spring.is_settled()
+            && self.width_spring.is_settled()
+            && self.height_spring.is_settled()
     }
 }
 
@@ -149,6 +254,7 @@ pub struct Button<'a> {
     external_state: Option<&'a mut ButtonState>,
     focused: bool,
     triggered: bool,
+    pressed: bool,
 }
 
 impl<'a> Button<'a> {
@@ -178,12 +284,19 @@ impl<'a> Button<'a> {
             external_state: None,
             focused: false,
             triggered: false,
+            pressed: false,
         }
     }
 
     /// Sets whether the button is explicitly focused (e.g. via keyboard navigation or selection).
     pub fn focused(mut self, focused: bool) -> Self {
         self.focused = focused;
+        self
+    }
+
+    /// Explicitly marks the button as physically pressed down.
+    pub fn pressed(mut self, pressed: bool) -> Self {
+        self.pressed = pressed;
         self
     }
 
@@ -351,25 +464,24 @@ impl<'a> Button<'a> {
         self
     }
 
-    /// Explicitly attaches an app-owned [`ButtonState`] struct.
+    /// Binds an external [`ButtonState`] instance.
     pub fn with_state(mut self, state: &'a mut ButtonState) -> Self {
         self.external_state = Some(state);
         self
     }
 
-    /// Provides an explicit unique ID source for state storage.
+    /// Sets an explicit ID source for state storage.
     pub fn id_source(mut self, id_source: impl std::hash::Hash) -> Self {
         self.id_source = Some(Id::new(id_source));
         self
     }
 
-    /// Renders the button into the provided UI and returns the standard [`egui::Response`].
-    pub fn show(self, ui: &mut Ui) -> Response {
-        let (default_padding, _) = self.size.metrics();
+    /// Renders the button and returns a [`ButtonResponse`].
+    pub fn show(mut self, ui: &mut Ui) -> ButtonResponse {
+        let (default_padding, _font_size) = self.size.metrics();
         let padding = self.padding.unwrap_or(default_padding);
 
-        // Measure text and components
-        let text_layout = self.text.into_galley(
+        let text_layout = self.text.clone().into_galley(
             ui,
             Some(false),
             f32::INFINITY,
@@ -425,9 +537,43 @@ impl<'a> Button<'a> {
             content_height + padding.y * 2.0,
         );
         let min_size = self.min_size.unwrap_or(Vec2::ZERO);
-        let final_size = desired_size.max(min_size);
+        let target_size = desired_size.max(min_size);
 
-        let (rect, response) = ui.allocate_exact_size(final_size, Sense::click());
+        let dt = ui.input(|i| i.stable_dt).min(0.05);
+        let id = self.id_source.unwrap_or_else(|| ui.next_auto_id());
+
+        let mut temp_state = if self.external_state.is_none() {
+            Some(ui.data_mut(|d| d.get_temp::<ButtonState>(id).unwrap_or_default()))
+        } else {
+            None
+        };
+
+        let state: &mut ButtonState = if let Some(ref mut ext) = self.external_state {
+            ext
+        } else {
+            temp_state.as_mut().unwrap()
+        };
+
+        if self.motion {
+            if !state.size_initialized {
+                state.width_spring.reset(target_size.x);
+                state.height_spring.reset(target_size.y);
+                state.size_initialized = true;
+            } else {
+                state.width_spring.set_target(target_size.x);
+                state.height_spring.set_target(target_size.y);
+                state.width_spring.update(dt);
+                state.height_spring.update(dt);
+            }
+        }
+
+        let allocated_size = if self.motion {
+            vec2(state.width_spring.value().max(4.0), state.height_spring.value().max(4.0))
+        } else {
+            target_size
+        };
+
+        let (rect, response) = ui.allocate_exact_size(allocated_size, Sense::click());
 
         // Resolve colors from ThemePalette or ui.visuals()
         let (base_fill, hover_fill, active_fill, base_stroke, text_color) =
@@ -445,7 +591,7 @@ impl<'a> Button<'a> {
                         self.hover_fill.unwrap_or(p.surface1),
                         self.active_fill.unwrap_or(p.surface2),
                         self.stroke.unwrap_or(Stroke::new(1.0, p.surface1)),
-                        self.text_color.unwrap_or(p.on_surface),
+                        self.text_color.unwrap_or(p.text),
                     ),
                     ButtonVariant::Ghost => (
                         self.fill.unwrap_or(Color32::TRANSPARENT),
@@ -463,8 +609,8 @@ impl<'a> Button<'a> {
                     ),
                     ButtonVariant::Outline => (
                         self.fill.unwrap_or(Color32::TRANSPARENT),
-                        self.hover_fill.unwrap_or(p.surface0.linear_multiply(0.5)),
-                        self.active_fill.unwrap_or(p.surface1.linear_multiply(0.5)),
+                        self.hover_fill.unwrap_or(p.accent.linear_multiply(0.15)),
+                        self.active_fill.unwrap_or(p.accent.linear_multiply(0.25)),
                         self.stroke.unwrap_or(Stroke::new(1.0, p.accent)),
                         self.text_color.unwrap_or(p.accent),
                     ),
@@ -491,7 +637,7 @@ impl<'a> Button<'a> {
                         self.hover_fill.unwrap_or(v.widgets.hovered.bg_fill),
                         self.active_fill.unwrap_or(v.widgets.active.bg_fill),
                         self.stroke.unwrap_or(Stroke::NONE),
-                        self.text_color.unwrap_or(v.widgets.active.fg_stroke.color),
+                        self.text_color.unwrap_or(v.selection.stroke.color),
                     ),
                     ButtonVariant::Secondary => (
                         self.fill.unwrap_or(v.widgets.inactive.bg_fill),
@@ -541,7 +687,6 @@ impl<'a> Button<'a> {
         let rounding = self.rounding.unwrap_or(Rounding::same(6.0));
 
         // Motion physics handling & Keyboard Event Detection
-        let dt = ui.input(|i| i.stable_dt).min(0.05);
         let is_focused = self.focused || response.has_focus();
 
         let (is_key_down, is_key_released) = if is_focused {
@@ -558,43 +703,42 @@ impl<'a> Button<'a> {
             (false, false)
         };
 
-        let is_hovered = is_focused;
-        let is_pressed = response.is_pointer_button_down_on() || is_key_down;
-        let is_clicked = response.clicked() || is_key_released || self.triggered;
+        let is_pressed = self.pressed
+            || (is_focused && (is_key_down || ui.input(|i| i.pointer.primary_down())))
+            || response.is_pointer_button_down_on();
+        let is_clicked = self.triggered
+            || (is_focused && is_key_released)
+            || response.clicked();
 
-        let (hover_factor, press_factor) = if self.motion {
-            if let Some(state) = self.external_state {
-                state.press_spring.params = self.spring_params;
-                state.update(dt, is_hovered, is_pressed, is_clicked, ui.ctx());
-                (state.hover_spring.value(), state.press_spring.value())
-            } else {
-                let id = self.id_source.unwrap_or(response.id);
-                let mut state: ButtonState = ui.data_mut(|d| {
-                    d.get_temp(id).unwrap_or_else(|| ButtonState {
-                        press_spring: Spring::new(0.0, self.spring_params),
-                        hover_spring: Spring::new(0.0, SpringParams::new(22.0, 0.55)),
-                    })
-                });
-                state.press_spring.params = self.spring_params;
-                state.update(dt, is_hovered, is_pressed, is_clicked, ui.ctx());
-                let values = (state.hover_spring.value(), state.press_spring.value());
-                ui.data_mut(|d| d.insert_temp(id, state));
-                values
-            }
+        let (hover_factor, hover_bounce, press_factor) = if self.motion {
+            state.press_spring.params = self.spring_params;
+            state.update(dt, is_focused, is_pressed, is_clicked, ui.ctx());
+            (
+                state.hover_spring.value(),
+                state.hover_bounce_spring.value(),
+                state.press_spring.value(),
+            )
         } else {
-            (if is_hovered { 1.0 } else { 0.0 }, if is_pressed { 1.0 } else { 0.0 })
+            (
+                if is_focused { 1.0 } else { 0.0 },
+                0.0,
+                if is_pressed { 1.0 } else { 0.0 },
+            )
         };
 
-        // Scale geometry with bouncy press compression, 3D vertical sink, & release pop overshoot
-        let scale_x = (1.0 + (hover_factor * 0.03) - (press_factor * 0.12)).max(0.65);
-        let scale_y = (1.0 + (hover_factor * 0.03) - (press_factor * 0.18)).max(0.65);
+        if let Some(st) = temp_state {
+            ui.data_mut(|d| d.insert_temp(id, st));
+        }
+
+        // Scale geometry with bouncy hover pulse, press compression, 3D vertical sink, & release pop overshoot
+        let scale = (1.0 + (hover_bounce * 0.12) - (press_factor * 0.14)).max(0.65);
         let y_offset = press_factor * 4.0;
         let center = rect.center() + vec2(0.0, y_offset);
         let animated_rect = Rect::from_center_size(
             center,
-            vec2(rect.width() * scale_x, rect.height() * scale_y),
+            vec2(rect.width() * scale, rect.height() * scale),
         );
-        let press_scale = scale_x;
+        let animated_rounding = rounding * scale;
 
         // Interpolate fill and stroke colors
         let current_fill = if press_factor > 0.05 {
@@ -617,21 +761,21 @@ impl<'a> Button<'a> {
             let painter = ui.painter();
 
             // Background surface
-            painter.add(Shape::rect_filled(animated_rect, rounding, current_fill));
+            painter.add(Shape::rect_filled(animated_rect, animated_rounding, current_fill));
 
             // Border stroke
             if current_stroke.width > 0.0 && current_stroke.color != Color32::TRANSPARENT {
-                painter.add(Shape::rect_stroke(animated_rect, rounding, current_stroke));
+                painter.add(Shape::rect_stroke(animated_rect, animated_rounding, current_stroke));
             }
 
             // Draw content (Icon + Text + Badge + Shortcut)
             let has_right_items = shortcut_layout.is_some() || badge_layout.is_some();
-            let icon_spacing = 6.0 * press_scale;
+            let icon_spacing = 6.0;
             let icon_w = icon_layout.as_ref().map(|i| i.size().x + icon_spacing).unwrap_or(0.0);
             let main_content_width = icon_w + text_layout.size().x;
 
             let mut cursor_x = if has_right_items {
-                animated_rect.left() + padding.x * press_scale
+                animated_rect.left() + padding.x
             } else {
                 animated_rect.center().x - main_content_width * 0.5
             };
@@ -653,7 +797,7 @@ impl<'a> Button<'a> {
             painter.galley(text_pos, text_layout, text_color);
 
             // Right-aligned elements
-            let mut right_cursor_x = animated_rect.right() - padding.x * press_scale;
+            let mut right_cursor_x = animated_rect.right() - padding.x;
 
             if let Some(ref sc) = shortcut_layout {
                 right_cursor_x -= sc.size().x;
@@ -663,7 +807,7 @@ impl<'a> Button<'a> {
                 );
                 let sc_color = text_color.linear_multiply(0.6);
                 painter.galley(sc_pos, sc.clone(), sc_color);
-                right_cursor_x -= 8.0 * press_scale;
+                right_cursor_x -= 8.0;
             }
 
             if let Some(ref bdg) = badge_layout {
@@ -682,7 +826,11 @@ impl<'a> Button<'a> {
             }
         }
 
-        response
+        ButtonResponse {
+            response,
+            is_pressed,
+            clicked: is_clicked,
+        }
     }
 }
 

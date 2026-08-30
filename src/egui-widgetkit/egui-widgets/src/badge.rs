@@ -5,10 +5,58 @@
 //! and theme palette synchronization.
 
 use egui::{
-    pos2, vec2, Color32, Response, Rounding, Sense, Shape, Stroke, TextStyle, Ui, Vec2,
+    pos2, vec2, Color32, Id, Response, Rounding, Sense, Shape, Stroke, TextStyle, Ui, Vec2,
     WidgetText,
 };
 use egui_themes::ThemePalette;
+use spring_core::{Spring, SpringParams};
+
+/// Persistent animation state for spring-animated badges.
+#[derive(Clone, Debug)]
+pub struct BadgeState {
+    /// Spring driving smooth width size transitions ($0.0 \to \text{target}$).
+    pub width_spring: Spring,
+    /// Spring driving smooth height size transitions ($0.0 \to \text{target}$).
+    pub height_spring: Spring,
+    /// Whether size springs have been initialized.
+    pub size_initialized: bool,
+}
+
+impl Default for BadgeState {
+    fn default() -> Self {
+        Self {
+            width_spring: Spring::new(0.0, SpringParams::new(26.0, 0.58)),
+            height_spring: Spring::new(0.0, SpringParams::new(26.0, 0.58)),
+            size_initialized: false,
+        }
+    }
+}
+
+impl BadgeState {
+    /// Updates size springs towards target dimensions and requests repaint if moving.
+    pub fn update(&mut self, dt: f32, target_size: Vec2, ctx: &egui::Context) {
+        if !self.size_initialized {
+            self.width_spring.reset(target_size.x);
+            self.height_spring.reset(target_size.y);
+            self.size_initialized = true;
+            return;
+        }
+
+        self.width_spring.set_target(target_size.x);
+        self.height_spring.set_target(target_size.y);
+        self.width_spring.update(dt);
+        self.height_spring.update(dt);
+
+        if !self.is_settled() {
+            ctx.request_repaint();
+        }
+    }
+
+    /// Returns `true` if all size springs have settled.
+    pub fn is_settled(&self) -> bool {
+        self.width_spring.is_settled() && self.height_spring.is_settled()
+    }
+}
 
 /// Semantic color variants for [`Badge`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -67,6 +115,9 @@ pub struct Badge<'a> {
     rounding: Option<Rounding>,
     padding: Vec2,
     palette: Option<&'a ThemePalette>,
+    motion: bool,
+    id_source: Option<Id>,
+    external_state: Option<&'a mut BadgeState>,
 }
 
 impl<'a> Badge<'a> {
@@ -81,9 +132,30 @@ impl<'a> Badge<'a> {
             stroke: None,
             text_color: None,
             rounding: None,
-            padding: vec2(8.0, 3.5),
+            padding: vec2(10.0, 4.5),
             palette: None,
+            motion: true,
+            id_source: None,
+            external_state: None,
         }
+    }
+
+    /// Explicitly attaches an app-owned [`BadgeState`] struct.
+    pub fn with_state(mut self, state: &'a mut BadgeState) -> Self {
+        self.external_state = Some(state);
+        self
+    }
+
+    /// Provides an explicit unique ID source for state storage.
+    pub fn id_source(mut self, id_source: impl std::hash::Hash) -> Self {
+        self.id_source = Some(Id::new(id_source));
+        self
+    }
+
+    /// Enables or disables spring motion animations (default `true`).
+    pub fn motion(mut self, motion: bool) -> Self {
+        self.motion = motion;
+        self
     }
 
     /// Sets the semantic badge variant.
@@ -181,7 +253,7 @@ impl<'a> Badge<'a> {
     }
 
     /// Renders the badge into the UI.
-    pub fn show(self, ui: &mut Ui) -> Response {
+    pub fn show(mut self, ui: &mut Ui) -> Response {
         let text_galley = self.text.into_galley(
             ui,
             Some(false),
@@ -189,17 +261,47 @@ impl<'a> Badge<'a> {
             TextStyle::Small,
         );
 
+        let dot_spacing = 15.0;
         let mut content_w = text_galley.size().x;
         if self.dot {
-            content_w += 12.0;
+            content_w += dot_spacing;
         }
 
         let desired_size = vec2(
             content_w + self.padding.x * 2.0,
-            text_galley.size().y + self.padding.y * 2.0,
+            (text_galley.size().y + self.padding.y * 2.0).max(22.0),
         );
 
-        let (rect, response) = ui.allocate_exact_size(desired_size, Sense::hover());
+        let dt = ui.input(|i| i.stable_dt).min(0.05);
+        let id = self.id_source.unwrap_or_else(|| ui.next_auto_id());
+
+        let mut temp_state = if self.external_state.is_none() {
+            Some(ui.data_mut(|d| d.get_temp::<BadgeState>(id).unwrap_or_default()))
+        } else {
+            None
+        };
+
+        let state: &mut BadgeState = if let Some(ref mut ext) = self.external_state {
+            ext
+        } else {
+            temp_state.as_mut().unwrap()
+        };
+
+        if self.motion {
+            state.update(dt, desired_size, ui.ctx());
+        }
+
+        let allocated_size = if self.motion {
+            vec2(state.width_spring.value().max(4.0), state.height_spring.value().max(4.0))
+        } else {
+            desired_size
+        };
+
+        let (rect, response) = ui.allocate_exact_size(allocated_size, Sense::hover());
+
+        if let Some(st) = temp_state {
+            ui.data_mut(|d| d.insert_temp(id, st));
+        }
 
         // Resolve colors based on ThemePalette and BadgeStyle
         let (bg_fill, bg_stroke, text_color, dot_color) = if let Some(p) = self.palette {
@@ -321,15 +423,15 @@ impl<'a> Badge<'a> {
                 painter.add(Shape::rect_stroke(rect, rounding, bg_stroke));
             }
 
-            // Dot
-            let mut cursor_x = rect.left() + self.padding.x;
+            // Center content inside rect
+            let mut cursor_x = rect.center().x - content_w * 0.5;
             if self.dot {
-                let dot_center = pos2(cursor_x + 4.0, rect.center().y);
+                let dot_center = pos2(cursor_x + 4.5, rect.center().y);
                 if self.style == BadgeStyle::Outline {
                     // Glowing dot: translucent outer halo + crisp core
                     painter.add(Shape::circle_filled(
                         dot_center,
-                        4.5,
+                        4.0,
                         Color32::from_rgba_unmultiplied(
                             dot_color.r(),
                             dot_color.g(),
@@ -342,7 +444,7 @@ impl<'a> Badge<'a> {
                     // Solid badge dot
                     painter.add(Shape::circle_filled(dot_center, 2.8, dot_color));
                 }
-                cursor_x += 12.0;
+                cursor_x += dot_spacing;
             }
 
             // Text

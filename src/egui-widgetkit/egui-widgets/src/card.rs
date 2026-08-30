@@ -14,35 +14,55 @@ use egui::{
 use egui_themes::ThemePalette;
 use spring_core::{Spring, SpringParams};
 
-/// Persistent animation state for interactive cards with spring hover lift.
+/// Persistent animation state for container cards with hover and press elevation springs.
 #[derive(Clone, Debug)]
 pub struct CardState {
     /// Spring driving hover elevation lift ($0.0 \to 1.0$).
     pub hover_spring: Spring,
+    /// Spring driving press compression and 3D depression ($0.0 \to 1.0$).
+    pub press_spring: Spring,
 }
 
 impl Default for CardState {
     fn default() -> Self {
         Self {
             hover_spring: Spring::new(0.0, SpringParams::new(22.0, 0.48)),
+            press_spring: Spring::new(0.0, SpringParams::new(20.0, 0.45)),
         }
     }
 }
 
 impl CardState {
-    /// Updates hover lift spring and requests repaint if moving.
-    pub fn update(&mut self, dt: f32, is_hovered: bool, ctx: &egui::Context) {
+    /// Updates hover lift and press springs and requests repaint if moving.
+    pub fn update(
+        &mut self,
+        dt: f32,
+        is_hovered: bool,
+        is_pressed: bool,
+        clicked: bool,
+        ctx: &egui::Context,
+    ) {
         self.hover_spring.set_target(if is_hovered { 1.0 } else { 0.0 });
+        if is_pressed {
+            self.press_spring.set_target(1.0);
+        } else if clicked {
+            self.press_spring.velocity = (self.press_spring.velocity + 12.0).min(18.0);
+            self.press_spring.set_target(0.0);
+        } else {
+            self.press_spring.set_target(0.0);
+        }
+
         self.hover_spring.update(dt);
+        self.press_spring.update(dt);
 
         if !self.is_settled() {
             ctx.request_repaint();
         }
     }
 
-    /// Returns `true` if hover lift has settled.
+    /// Returns `true` if all motion springs have settled.
     pub fn is_settled(&self) -> bool {
-        self.hover_spring.is_settled()
+        self.hover_spring.is_settled() && self.press_spring.is_settled()
     }
 }
 
@@ -76,6 +96,8 @@ pub struct Card<'a> {
     min_size: Vec2,
     interactive: bool,
     focused: bool,
+    triggered: bool,
+    pressed: bool,
     hover_lift: f32,
     spring_params: SpringParams,
     motion: bool,
@@ -108,12 +130,26 @@ impl<'a> Card<'a> {
             hover_lift: 4.0,
             interactive: false,
             focused: false,
+            triggered: false,
+            pressed: false,
             spring_params: SpringParams::new(22.0, 0.48),
             motion: true,
             palette: None,
             id_source: None,
             external_state: None,
         }
+    }
+
+    /// Explicitly marks the card as pressed / held down.
+    pub fn pressed(mut self, pressed: bool) -> Self {
+        self.pressed = pressed;
+        self
+    }
+
+    /// Explicitly triggers a click action this frame.
+    pub fn triggered(mut self, triggered: bool) -> Self {
+        self.triggered = triggered;
+        self
     }
 
     /// Sets an optional card title header.
@@ -337,21 +373,38 @@ impl<'a> Card<'a> {
 
         // Active state is driven strictly by focus (highlight selection)
         let is_active = self.focused;
+        let (is_key_down, is_key_released) = if self.focused {
+            ui.input(|i| {
+                if i.modifiers.ctrl || i.modifiers.alt {
+                    (false, false)
+                } else {
+                    let down = i.key_down(egui::Key::F) || i.key_down(egui::Key::Enter) || i.key_down(egui::Key::Space);
+                    let released = i.key_released(egui::Key::F) || i.key_released(egui::Key::Enter) || i.key_released(egui::Key::Space);
+                    (down, released)
+                }
+            })
+        } else {
+            (false, false)
+        };
+
+        let is_pressed = self.pressed || response.is_pointer_button_down_on() || is_key_down;
+        let is_clicked = response.clicked() || is_key_released || self.triggered;
 
         // Update animation state using active hover / focus state (animates both IN and OUT)
         if self.motion {
             if let Some(state) = self.external_state {
-                state.update(dt, is_active, ui.ctx());
+                state.update(dt, is_active, is_pressed, is_clicked, ui.ctx());
                 let val = state.hover_spring.value();
                 ui.data_mut(|d| d.insert_temp(id.with("hover_val"), val));
             } else {
                 let mut state: CardState = ui.data_mut(|d| {
                     d.get_temp(id).unwrap_or_else(|| CardState {
                         hover_spring: Spring::new(0.0, self.spring_params),
+                        press_spring: Spring::new(0.0, SpringParams::new(20.0, 0.45)),
                     })
                 });
                 state.hover_spring.params = self.spring_params;
-                state.update(dt, is_active, ui.ctx());
+                state.update(dt, is_active, is_pressed, is_clicked, ui.ctx());
                 let val = state.hover_spring.value();
                 ui.data_mut(|d| {
                     d.insert_temp(id, state);

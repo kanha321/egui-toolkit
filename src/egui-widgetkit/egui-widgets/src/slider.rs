@@ -32,11 +32,13 @@ pub enum SliderLayout {
 /// Persistent animation and interaction state for interactive sliders.
 #[derive(Clone, Debug)]
 pub struct SliderState {
-    /// Spring driving knob radius scale multiplier ($0.0 \to 1.0$).
+    /// Spring driving knob scale and click pop ($0.0 \to 1.0$).
     pub knob_scale_spring: Spring,
-    /// Spring driving visual knob position along the track ($0.0 \to 1.0$).
+    /// Spring driving continuous thumb positioning across the track ($0.0 \to 1.0$).
     pub position_spring: Spring,
-    /// Whether the initial position has been set.
+    /// Spring driving smooth width size transitions for the numeric value badge.
+    pub badge_width_spring: Spring,
+    /// Whether initial spring states have been seeded.
     pub initialized: bool,
     /// Whether direct numeric text editing is actively open.
     pub editing: bool,
@@ -56,6 +58,7 @@ impl Default for SliderState {
         Self {
             knob_scale_spring: Spring::new(0.0, KNOB_SCALE_PARAMS),
             position_spring: Spring::new(0.0, SpringParams::new(28.1, 0.64)),
+            badge_width_spring: Spring::new(56.0, SpringParams::new(26.0, 0.58)),
             initialized: false,
             editing: false,
             edit_buffer: String::new(),
@@ -120,6 +123,7 @@ impl SliderState {
     pub fn is_settled(&self) -> bool {
         self.knob_scale_spring.is_settled()
             && self.position_spring.is_settled()
+            && self.badge_width_spring.is_settled()
             && self.input_state.is_settled()
     }
 }
@@ -363,7 +367,7 @@ impl<'a, T: Numeric> Slider<'a, T> {
             Color32::WHITE,
         );
 
-        let badge_w = (value_galley.size().x + 18.0).max(56.0);
+        let target_badge_w = (value_galley.size().x + 18.0).max(56.0);
         let badge_h = 22.0;
 
         let row_height = (self.knob_radius * 2.0 + 12.0).max(28.0);
@@ -387,6 +391,34 @@ impl<'a, T: Numeric> Slider<'a, T> {
                 response.id
             }
         });
+
+        let dt = ui.input(|i| i.stable_dt).min(0.05);
+
+        // Fetch persistent animation and text editing state
+        let mut state: SliderState = if let Some(ref ext) = self.external_state {
+            (*ext).clone()
+        } else {
+            ui.data_mut(|d| {
+                d.get_temp(id).unwrap_or_else(|| {
+                    let mut s = SliderState::default();
+                    let current_val_normalized =
+                        ((self.value.to_f64() - min_val) / val_span).clamp(0.0, 1.0) as f32;
+                    s.position_spring = Spring::new(current_val_normalized, self.spring_params);
+                    s.knob_scale_spring = Spring::new(0.0, KNOB_SCALE_PARAMS);
+                    s.badge_width_spring = Spring::new(target_badge_w, SpringParams::new(26.0, 0.58));
+                    s.initialized = true;
+                    s
+                })
+            })
+        };
+
+        if !state.initialized {
+            state.badge_width_spring = Spring::new(target_badge_w, SpringParams::new(26.0, 0.58));
+        } else {
+            state.badge_width_spring.set_target(target_badge_w);
+            state.badge_width_spring.update(dt);
+        }
+        let badge_w = state.badge_width_spring.value();
 
         // Geometry computation: perfectly centered on center.y
         let (track_left, track_right, track_y, badge_rect) = match self.layout {
@@ -427,23 +459,6 @@ impl<'a, T: Numeric> Slider<'a, T> {
         };
 
         let track_width = (track_right - track_left).max(10.0);
-
-        // Fetch persistent animation and text editing state
-        let mut state: SliderState = if let Some(ref ext) = self.external_state {
-            (*ext).clone()
-        } else {
-            ui.data_mut(|d| {
-                d.get_temp(id).unwrap_or_else(|| {
-                    let mut s = SliderState::default();
-                    let current_val_normalized =
-                        ((self.value.to_f64() - min_val) / val_span).clamp(0.0, 1.0) as f32;
-                    s.position_spring = Spring::new(current_val_normalized, self.spring_params);
-                    s.knob_scale_spring = Spring::new(0.0, KNOB_SCALE_PARAMS);
-                    s.initialized = true;
-                    s
-                })
-            })
-        };
 
         // Track interactive click and drag
         let track_hit_rect = Rect::from_min_max(
@@ -586,13 +601,13 @@ impl<'a, T: Numeric> Slider<'a, T> {
         let current_val_normalized =
             ((self.value.to_f64() - min_val) / val_span).clamp(0.0, 1.0) as f32;
 
-        let is_hovered = self.focused || response.dragged() || state.editing;
+        let is_focused = self.focused || response.dragged() || state.editing;
 
         let (knob_scale_factor, visual_progress) = if self.motion {
             state.update(
                 dt,
                 current_val_normalized,
-                is_hovered,
+                is_focused,
                 response.dragged(),
                 response.clicked(),
                 pos_params,
@@ -602,7 +617,7 @@ impl<'a, T: Numeric> Slider<'a, T> {
             (state.knob_scale_spring.value(), state.position_spring.value())
         } else {
             (
-                if is_hovered || response.dragged() { 1.0 } else { 0.0 },
+                if is_focused || response.dragged() { 1.0 } else { 0.0 },
                 current_val_normalized,
             )
         };

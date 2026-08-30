@@ -8,7 +8,7 @@
 //! Animations are tracked via ID temporary storage or an app-owned [`TabsState`] (`CODING_RULES §2`).
 
 use egui::{
-    pos2, vec2, Color32, Id, Rect, Response, Rounding, Sense, Shape, Stroke, TextStyle, Ui,
+    pos2, vec2, Color32, Id, Rect, Rounding, Sense, Shape, Stroke, TextStyle, Ui,
     Vec2, WidgetText,
 };
 use egui_themes::ThemePalette;
@@ -51,6 +51,72 @@ impl<T> TabItem<T> {
     }
 }
 
+/// Response returned by [`SegmentedTabs::show`] providing standard egui interaction methods
+/// alongside fine-grained lifecycle querying (`clicked`, `is_pressed`, `is_held`, `changed`).
+#[derive(Clone, Debug)]
+pub struct TabsResponse {
+    /// The underlying [`egui::Response`].
+    pub response: egui::Response,
+    /// Whether the tabs container is currently pressed / held down (mouse or keyboard).
+    pub is_pressed: bool,
+    /// Standard click action: fired strictly on release.
+    pub clicked: bool,
+}
+
+impl TabsResponse {
+    /// Returns `true` if a tab was clicked on release.
+    #[inline]
+    pub fn clicked(&self) -> bool {
+        self.clicked
+    }
+
+    /// Returns `true` while a tab is currently pressed down.
+    #[inline]
+    pub fn is_pressed(&self) -> bool {
+        self.is_pressed
+    }
+
+    /// Returns `true` while a tab is currently held down (alias for `is_pressed`).
+    #[inline]
+    pub fn is_held(&self) -> bool {
+        self.is_pressed
+    }
+
+    /// Returns `true` if the tab selection changed this frame.
+    #[inline]
+    pub fn changed(&self) -> bool {
+        self.response.changed()
+    }
+
+    /// Unwraps and returns the inner [`egui::Response`].
+    #[inline]
+    pub fn into_inner(self) -> egui::Response {
+        self.response
+    }
+}
+
+impl std::ops::Deref for TabsResponse {
+    type Target = egui::Response;
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.response
+    }
+}
+
+impl std::ops::DerefMut for TabsResponse {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.response
+    }
+}
+
+impl From<TabsResponse> for egui::Response {
+    #[inline]
+    fn from(r: TabsResponse) -> Self {
+        r.response
+    }
+}
+
 /// Persistent animation state for sliding segmented tabs.
 #[derive(Clone, Debug)]
 pub struct TabsState {
@@ -58,6 +124,8 @@ pub struct TabsState {
     pub x_spring: Spring,
     /// Spring driving the width of the selection pill.
     pub width_spring: Spring,
+    /// Spring driving vertical pill compression and depression ($0.0 \to 1.0$).
+    pub press_spring: Spring,
     /// Whether the tab position has been initialized.
     pub initialized: bool,
 }
@@ -67,6 +135,7 @@ impl Default for TabsState {
         Self {
             x_spring: Spring::new(0.0, SpringParams::new(24.0, 0.48)),
             width_spring: Spring::new(0.0, SpringParams::new(24.0, 0.48)),
+            press_spring: Spring::new(0.0, SpringParams::new(20.0, 0.45)),
             initialized: false,
         }
     }
@@ -74,12 +143,29 @@ impl Default for TabsState {
 
 impl TabsState {
     /// Updates the sliding springs towards the target rect and requests repaint if moving.
-    pub fn update(&mut self, dt: f32, target_rect: Rect, ctx: &egui::Context) {
+    pub fn update(
+        &mut self,
+        dt: f32,
+        target_rect: Rect,
+        is_pressed: bool,
+        clicked: bool,
+        ctx: &egui::Context,
+    ) {
         if !self.initialized {
             self.x_spring = Spring::new(target_rect.min.x, SpringParams::new(24.0, 0.48));
             self.width_spring = Spring::new(target_rect.width(), SpringParams::new(24.0, 0.48));
+            self.press_spring = Spring::new(0.0, SpringParams::new(20.0, 0.45));
             self.initialized = true;
             return;
+        }
+
+        if is_pressed {
+            self.press_spring.set_target(1.0);
+        } else if clicked {
+            self.press_spring.velocity = (self.press_spring.velocity + 14.0).min(20.0);
+            self.press_spring.set_target(0.0);
+        } else {
+            self.press_spring.set_target(0.0);
         }
 
         if (target_rect.min.x - self.x_spring.target).abs() > 0.5 {
@@ -92,15 +178,16 @@ impl TabsState {
 
         self.x_spring.update(dt);
         self.width_spring.update(dt);
+        self.press_spring.update(dt);
 
         if !self.is_settled() {
             ctx.request_repaint();
         }
     }
 
-    /// Returns `true` if the sliding pill has settled on target.
+    /// Returns `true` if all motion springs have settled on target.
     pub fn is_settled(&self) -> bool {
-        self.x_spring.is_settled() && self.width_spring.is_settled()
+        self.x_spring.is_settled() && self.width_spring.is_settled() && self.press_spring.is_settled()
     }
 }
 
@@ -138,6 +225,9 @@ pub struct SegmentedTabs<'a, T: PartialEq + Clone> {
     palette: Option<&'a ThemePalette>,
     id_source: Option<Id>,
     external_state: Option<&'a mut TabsState>,
+    focused: bool,
+    triggered: bool,
+    pressed: bool,
 }
 
 impl<'a, T: PartialEq + Clone> SegmentedTabs<'a, T> {
@@ -159,6 +249,9 @@ impl<'a, T: PartialEq + Clone> SegmentedTabs<'a, T> {
             palette: None,
             id_source: None,
             external_state: None,
+            focused: false,
+            triggered: false,
+            pressed: false,
         }
     }
 
@@ -246,6 +339,24 @@ impl<'a, T: PartialEq + Clone> SegmentedTabs<'a, T> {
         self
     }
 
+    /// Explicitly marks the tabs as focused.
+    pub fn focused(mut self, focused: bool) -> Self {
+        self.focused = focused;
+        self
+    }
+
+    /// Explicitly marks the tabs as pressed / held down.
+    pub fn pressed(mut self, pressed: bool) -> Self {
+        self.pressed = pressed;
+        self
+    }
+
+    /// Explicitly triggers a selection action this frame (e.g. from Enter/Space/F key release).
+    pub fn triggered(mut self, triggered: bool) -> Self {
+        self.triggered = triggered;
+        self
+    }
+
     /// Provides an explicit ID source for state storage.
     pub fn id_source(mut self, id_source: impl std::hash::Hash) -> Self {
         self.id_source = Some(Id::new(id_source));
@@ -253,10 +364,15 @@ impl<'a, T: PartialEq + Clone> SegmentedTabs<'a, T> {
     }
 
     /// Renders the segmented tabs and updates `selected` when a tab is clicked.
-    pub fn show(self, ui: &mut Ui) -> Response {
+    pub fn show(self, ui: &mut Ui) -> TabsResponse {
         let n_items = self.items.len();
         if n_items == 0 {
-            return ui.allocate_response(Vec2::ZERO, Sense::hover());
+            let resp = ui.allocate_response(Vec2::ZERO, Sense::hover());
+            return TabsResponse {
+                response: resp,
+                is_pressed: false,
+                clicked: false,
+            };
         }
 
         let padding = vec2(12.0, 6.0);
@@ -308,6 +424,24 @@ impl<'a, T: PartialEq + Clone> SegmentedTabs<'a, T> {
         let (container_rect, mut response) =
             ui.allocate_exact_size(container_size, Sense::click_and_drag());
 
+        let is_focused = self.focused || response.has_focus();
+        let (is_key_down, is_key_released) = if is_focused {
+            ui.input(|i| {
+                if i.modifiers.ctrl || i.modifiers.alt {
+                    (false, false)
+                } else {
+                    let down = i.key_down(egui::Key::F) || i.key_down(egui::Key::Enter) || i.key_down(egui::Key::Space);
+                    let released = i.key_released(egui::Key::F) || i.key_released(egui::Key::Enter) || i.key_released(egui::Key::Space);
+                    (down, released)
+                }
+            })
+        } else {
+            (false, false)
+        };
+
+        let is_pressed = self.pressed || response.is_pointer_button_down_on() || is_key_down;
+        let is_clicked = response.clicked() || is_key_released || self.triggered;
+
         // Resolve colors
         let (bg_fill, bg_stroke, pill_fill, pill_stroke, active_text, inactive_text) =
             if let Some(p) = self.palette {
@@ -346,7 +480,7 @@ impl<'a, T: PartialEq + Clone> SegmentedTabs<'a, T> {
                 target_pill_rect = tab_rect;
             }
 
-            if response.clicked() {
+            if is_clicked {
                 if let Some(mouse_pos) = response.interact_pointer_pos() {
                     if tab_rect.contains(mouse_pos) && item.value != *self.selected {
                         *self.selected = item.value.clone();
@@ -359,28 +493,35 @@ impl<'a, T: PartialEq + Clone> SegmentedTabs<'a, T> {
         // Motion physics handling
         let dt = ui.input(|i| i.stable_dt).min(0.05);
 
-        let (pill_x, pill_w) = if self.motion {
+        let (pill_x, pill_w, press_factor) = if self.motion {
             if let Some(state) = self.external_state {
-                state.update(dt, target_pill_rect, ui.ctx());
-                (state.x_spring.value(), state.width_spring.value())
+                state.update(dt, target_pill_rect, is_pressed, is_clicked, ui.ctx());
+                (state.x_spring.value(), state.width_spring.value(), state.press_spring.value())
             } else {
                 let id = self.id_source.unwrap_or_else(|| ui.make_persistent_id("segmented_tabs"));
                 let mut state: TabsState = ui.data_mut(|d| {
                     d.get_temp(id).unwrap_or_default()
                 });
 
-                state.update(dt, target_pill_rect, ui.ctx());
-                let values = (state.x_spring.value(), state.width_spring.value());
+                state.update(dt, target_pill_rect, is_pressed, is_clicked, ui.ctx());
+                let values = (state.x_spring.value(), state.width_spring.value(), state.press_spring.value());
                 ui.data_mut(|d| d.insert_temp(id, state));
                 values
             }
         } else {
-            (target_pill_rect.min.x, target_pill_rect.width())
+            (
+                target_pill_rect.min.x,
+                target_pill_rect.width(),
+                if is_pressed { 1.0 } else { 0.0 },
+            )
         };
 
-        let active_pill_rect = Rect::from_min_size(
-            pos2(pill_x, container_rect.top() + pill_margin),
-            vec2(pill_w, container_rect.height() - pill_margin * 2.0),
+        let y_sink = press_factor * 1.5;
+        let pill_h_scale = (1.0 - press_factor * 0.10).max(0.7);
+        let base_pill_h = container_rect.height() - pill_margin * 2.0;
+        let active_pill_rect = Rect::from_center_size(
+            pos2(pill_x + pill_w * 0.5, container_rect.center().y + y_sink),
+            vec2(pill_w, base_pill_h * pill_h_scale),
         );
 
         if ui.is_rect_visible(container_rect) {
@@ -404,8 +545,8 @@ impl<'a, T: PartialEq + Clone> SegmentedTabs<'a, T> {
             for (idx, (item, (label, icon, badge, _))) in self.items.iter().zip(tab_galleys.into_iter()).enumerate() {
                 let tab_x = container_rect.left() + pill_margin + (idx as f32 * tab_width);
                 let tab_rect = Rect::from_min_size(
-                    pos2(tab_x, container_rect.top() + pill_margin),
-                    vec2(tab_width, container_rect.height() - pill_margin * 2.0),
+                    pos2(tab_x, container_rect.top() + pill_margin + y_sink),
+                    vec2(tab_width, base_pill_h),
                 );
 
                 let is_active = item.value == *self.selected;
@@ -455,6 +596,10 @@ impl<'a, T: PartialEq + Clone> SegmentedTabs<'a, T> {
             }
         }
 
-        response
+        TabsResponse {
+            response,
+            is_pressed,
+            clicked: is_clicked,
+        }
     }
 }

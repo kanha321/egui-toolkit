@@ -31,26 +31,32 @@
 //! - [`Card`], [`CardState`]: Container surfaces with optional spring hover lift.
 //! - [`Badge`], [`BadgeVariant`]: Semantic status badges and tag indicators.
 //! - [`TextInput`], [`InputState`]: Text inputs with animated spring focus glow rings.
+//! - [`Dropdown`], [`DropdownOption`], [`DropdownResponse`], [`DropdownState`]: Spring-animated dropdown menus.
 
 pub mod badge;
 pub mod button;
 pub mod card;
 pub mod checkbox;
+pub mod dropdown;
 pub mod input;
 pub mod progress;
 pub mod slider;
 pub mod switch;
 pub mod tabs;
 
-pub use badge::{Badge, BadgeStyle, BadgeVariant};
-pub use button::{Button, ButtonSize, ButtonState, ButtonVariant};
+pub use badge::{Badge, BadgeState, BadgeStyle, BadgeVariant};
+pub use button::{Button, ButtonResponse, ButtonSize, ButtonState, ButtonVariant};
 pub use card::{Card, CardState};
-pub use checkbox::{Checkbox, CheckboxState, RadioButton};
-pub use input::{lerp_color, resolve_vim_mode_color, InputState, TextAlign, TextInput};
+pub use checkbox::{Checkbox, CheckboxResponse, CheckboxState, RadioButton, RadioResponse, RadioState};
+pub use dropdown::{Dropdown, DropdownItemContext, DropdownOption, DropdownResponse, DropdownState};
+pub use input::{
+    lerp_color, resolve_vim_mode_color, DragSelectionState, DropFlightAnim, InputState, TextAlign,
+    TextInput,
+};
 pub use progress::{ProgressBar, ProgressState, ProgressVariant};
 pub use slider::{Slider, SliderLayout, SliderState};
-pub use switch::{Switch, SwitchSize, SwitchState};
-pub use tabs::{SegmentedTabs, TabItem, TabsState};
+pub use switch::{Switch, SwitchResponse, SwitchSize, SwitchState};
+pub use tabs::{SegmentedTabs, TabItem, TabsResponse, TabsState};
 
 /// Returns whether pointer hover should be rendered visually.
 ///

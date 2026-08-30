@@ -92,24 +92,40 @@ impl VimBufferState {
 
     /// Returns the active visual selection byte range `[start..end]`, if any.
     pub fn selection_range(&self) -> Option<Range<usize>> {
+        if self.text.is_empty() {
+            return None;
+        }
         match self.mode {
             VimMode::Visual(VisualType::Character) | VimMode::Visual(VisualType::Block) => {
                 if let Some(anchor) = self.anchor {
-                    let start = anchor.min(self.cursor);
-                    let end = anchor.max(self.cursor);
+                    let mut start = anchor.min(self.cursor).min(self.text.len());
+                    while !self.text.is_char_boundary(start) && start > 0 {
+                        start -= 1;
+                    }
+                    let mut end = anchor.max(self.cursor).min(self.text.len());
+                    while !self.text.is_char_boundary(end) && end > 0 {
+                        end -= 1;
+                    }
                     // Include character under the cursor
-                    let end_char_len = self.text[end..].chars().next().map_or(0, |c| c.len_utf8());
-                    Some(start..(end + end_char_len))
+                    let end_char_len = self.text.get(end..).and_then(|s| s.chars().next()).map_or(0, |c| c.len_utf8());
+                    let final_end = (end + end_char_len).min(self.text.len());
+                    Some(start..final_end)
                 } else {
                     None
                 }
             }
             VimMode::Visual(VisualType::Line) => {
                 if let Some(anchor) = self.anchor {
-                    let start_idx = anchor.min(self.cursor);
-                    let end_idx = anchor.max(self.cursor);
+                    let mut start_idx = anchor.min(self.cursor).min(self.text.len());
+                    while !self.text.is_char_boundary(start_idx) && start_idx > 0 {
+                        start_idx -= 1;
+                    }
+                    let mut end_idx = anchor.max(self.cursor).min(self.text.len());
+                    while !self.text.is_char_boundary(end_idx) && end_idx > 0 {
+                        end_idx -= 1;
+                    }
                     // Beginning of the line containing start_idx
-                    let line_start = self.text[..start_idx.min(self.text.len())].rfind('\n').map_or(0, |i| i + 1);
+                    let line_start = self.text.get(..start_idx).and_then(|s| s.rfind('\n')).map_or(0, |i| i + 1);
                     // End of the line containing end_idx (including trailing newline if present)
                     let line_end = text_line_end(&self.text, end_idx);
                     let end_with_nl = if line_end < self.text.len() { line_end + 1 } else { line_end };
@@ -142,7 +158,7 @@ impl VimBufferState {
                     let key_handled = self.handle_key(key, &modifiers);
                     if key_handled {
                         handled = true;
-                        ctx.input_mut(|i| i.consume_key(Modifiers::NONE, key));
+                        ctx.input_mut(|i| i.consume_key(modifiers, key));
                     }
                     // If this key just entered Insert mode, suppress the
                     // immediately-following Event::Text for the same key
@@ -179,8 +195,8 @@ impl VimBufferState {
 
     /// Handles a single key press event.
     pub fn handle_key(&mut self, key: Key, modifiers: &Modifiers) -> bool {
-        // 1. Universal Escape handling: return to Normal mode
-        if key == Key::Escape {
+        // 1. Universal Escape / Ctrl+C handling: return to Normal mode
+        if key == Key::Escape || (modifiers.ctrl && key == Key::C) {
             if self.mode.is_insert() || self.mode.is_visual() || self.mode == VimMode::Replace {
                 self.mode = VimMode::Normal;
                 self.anchor = None;

@@ -4,14 +4,39 @@ use egui::{Rect, Rounding, Stroke, Ui, Vec2};
 use egui_spring::{HighlightConfig, HighlightGroup, MotionPhysics, sync_highlight_stroke_color, set_highlight_fill, update_and_paint};
 use egui_themes::ThemePalette;
 use egui_vim_nav::{
-    Direction, FocusGraph, Navigator, Scrolloff, VimAction, VimBufferState, VimKeyHandler, VimMode,
+    Direction, FocusGraph, Navigator, Scrolloff, VimAction, VimActionState, VimBufferState, VimKeyHandler, VimMode,
     FocusLevel, ModalTransition, check_modal_transition, hierarchical_move,
 };
 use egui_widgets::{
-    Badge, Button, Card, Checkbox, InputState, ProgressBar, ProgressVariant, RadioButton,
-    SegmentedTabs, Slider, SliderState, Switch, TextInput,
+    Badge, Button, Card, Checkbox, Dropdown, DropdownOption, DropdownState, InputState,
+    ProgressBar, ProgressVariant, RadioButton, SegmentedTabs, Slider, SliderState, Switch,
+    TextInput,
 };
 use spring_core::SpringParams;
+
+/// Cluster deployment region demo enum.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum DemoRegion {
+    #[default]
+    UsEast,
+    UsWest,
+    EuCentral,
+    EuWest,
+    ApSouth,
+    ApNortheast,
+    SaEast,
+    AfSouth,
+}
+
+/// Logging level demo enum.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum DemoLogLevel {
+    Debug,
+    #[default]
+    Info,
+    Warn,
+    Error,
+}
 
 /// Widget category tabs.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -40,6 +65,7 @@ pub enum DashboardWidget {
     ProgressBtn75,
     ProgressBtn100,
     TokenInput,
+    DropdownRegion,
     RadioDev,
     RadioStaging,
     RadioProd,
@@ -82,7 +108,7 @@ pub struct WidgetsDemoState {
     pub progress_value: f32,
     pub checkbox_newsletter: bool,
     pub checkbox_telemetry: bool,
-    pub radio_tier: usize,
+    pub radio_tier: Option<usize>,
     pub search_term: String,
     pub token_input: String,
     pub search_vim: VimBufferState,
@@ -91,6 +117,10 @@ pub struct WidgetsDemoState {
     pub token_input_state: InputState,
     pub bandwidth_slider_state: SliderState,
     pub thermal_slider_state: SliderState,
+    pub demo_region: DemoRegion,
+    pub demo_log_level: DemoLogLevel,
+    pub demo_region_dropdown_state: DropdownState,
+    pub demo_log_dropdown_state: DropdownState,
     // Intuitive physics parameters
     pub response_time: f32,    // seconds — how long the animation takes
     pub bounce: f32,           // 0.0–1.0 — overshoot amount (0 = none)
@@ -110,6 +140,10 @@ pub struct WidgetsDemoState {
     pub focus_level: FocusLevel,
     /// Directional scrolloff and spring-damped viewport scrolling manager
     pub dash_scrolloff: Scrolloff<DashboardWidget>,
+    // Dynamic size animation demo steps
+    pub scan_button_step: usize,
+    pub deploy_button_step: usize,
+    pub gallery_btn_step: usize,
 }
 
 impl Default for WidgetsDemoState {
@@ -134,9 +168,10 @@ impl Default for WidgetsDemoState {
         g.connect_horizontal(ProgressBtn50, ProgressBtn75);
         g.connect_horizontal(ProgressBtn75, ProgressBtn100);
 
-        // 4. Column 2: Security card (token input -> radios -> notify sandwich + mirror)
+        // 4. Column 2: Security card (token input -> dropdown region -> radios -> notify sandwich + mirror)
+        g.connect_vertical(TokenInput, DropdownRegion);
         g.connect_branch_between(
-            TokenInput,
+            DropdownRegion,
             Direction::Down,
             &[RadioDev, RadioStaging, RadioProd],
             CheckNotify,
@@ -190,7 +225,7 @@ impl Default for WidgetsDemoState {
             progress_value: 0.65,
             checkbox_newsletter: true,
             checkbox_telemetry: false,
-            radio_tier: 2,
+            radio_tier: Some(2),
             search_term: String::new(),
             token_input: String::new(),
             search_vim: VimBufferState::new(""),
@@ -199,6 +234,10 @@ impl Default for WidgetsDemoState {
             token_input_state: InputState::default(),
             bandwidth_slider_state: SliderState::default(),
             thermal_slider_state: SliderState::default(),
+            demo_region: DemoRegion::default(),
+            demo_log_level: DemoLogLevel::default(),
+            demo_region_dropdown_state: DropdownState::default(),
+            demo_log_dropdown_state: DropdownState::default(),
             response_time: 0.10,
             bounce: 0.47,
             mass: 5.0,
@@ -219,6 +258,9 @@ impl Default for WidgetsDemoState {
             ],
             focus_level: FocusLevel::Navigation,
             dash_scrolloff: Scrolloff::new(),
+            scan_button_step: 0,
+            deploy_button_step: 0,
+            gallery_btn_step: 0,
         }
     }
 }
@@ -227,10 +269,14 @@ impl WidgetsDemoState {
     /// Focuses a widget, updates branch memory, synchronizes section navigation,
     /// and records the last active widget for that section.
     pub fn record_widget_focus(&mut self, id: DashboardWidget) {
+        let prev = self.dash_nav.focused().copied();
         self.dash_nav.set_focus_with_graph(Some(id), &self.dash_graph);
         let sec = widget_to_section(id);
         self.dash_section_nav.set_focus(Some(sec));
         self.last_section_widget[sec as usize] = id;
+        if Some(id) != prev {
+            self.dash_scrolloff.record_nav_event(Some(id), None);
+        }
     }
 }
 
@@ -243,7 +289,7 @@ fn widget_to_section(w: DashboardWidget) -> DashSection {
             => DashSection::CoreEngine,
         ProgressBtn25 | ProgressBtn50 | ProgressBtn75 | ProgressBtn100
             => DashSection::PipelineSync,
-        TokenInput | RadioDev | RadioStaging | RadioProd | CheckNotify | CheckMirror
+        TokenInput | DropdownRegion | RadioDev | RadioStaging | RadioProd | CheckNotify | CheckMirror
             => DashSection::Security,
         BtnDeploy | BtnVerify | BtnPurge | BtnHalt
             => DashSection::ActionDispatcher,
@@ -395,7 +441,8 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
 
     let dt = ui.input(|i| i.stable_dt).min(0.05);
 
-    let scroll_area = egui::ScrollArea::vertical();
+    let pointer_in_dropdown = state.demo_region_dropdown_state.contains_pointer(ui.ctx());
+    let scroll_area = egui::ScrollArea::vertical().enable_scrolling(!pointer_in_dropdown);
     let is_dashboard = state.category == WidgetsCategory::CompositeDashboard;
     let (scroll_area, applied_scroll) = if is_dashboard {
         let (sa, val) = state.dash_scrolloff.inject_into(scroll_area, dt);
@@ -413,12 +460,22 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                     .palette(palette)
                     .show(ui, |ui| {
                         ui.horizontal_wrapped(|ui| {
-                            Button::new("Primary Action")
+                            let gallery_labels = [
+                                "Primary Action",
+                                "Dynamic Expanding Label (Smooth Spring Transition!)",
+                                "Contracted Label",
+                            ];
+                            let gallery_text = gallery_labels[state.gallery_btn_step % gallery_labels.len()];
+                            if Button::new(gallery_text)
                                 .primary()
                                 .icon("⚡")
                                 .palette(palette)
                                 .spring_params(custom_spring_params)
-                                .show(ui);
+                                .show(ui)
+                                .clicked()
+                            {
+                                state.gallery_btn_step += 1;
+                            }
 
                             Button::new("Secondary")
                                 .secondary()
@@ -553,17 +610,17 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                         ui.separator();
                         ui.add_space(6.0);
 
-                        ui.label("Select Deployment Tier:");
+                        ui.label("Select Deployment Tier (Nullable — click selected to deselect):");
                         ui.horizontal(|ui| {
-                            RadioButton::new(1, &mut state.radio_tier)
+                            RadioButton::nullable(1, &mut state.radio_tier)
                                 .label("Standard")
                                 .palette(palette)
                                 .show(ui);
-                            RadioButton::new(2, &mut state.radio_tier)
+                            RadioButton::nullable(2, &mut state.radio_tier)
                                 .label("Professional")
                                 .palette(palette)
                                 .show(ui);
-                            RadioButton::new(3, &mut state.radio_tier)
+                            RadioButton::nullable(3, &mut state.radio_tier)
                                 .label("Enterprise")
                                 .palette(palette)
                                 .show(ui);
@@ -639,6 +696,47 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                             .palette(palette)
                             .spring_params(custom_spring_params)
                             .show(ui);
+                    });
+
+                ui.add_space(12.0);
+
+                Card::new()
+                    .title("Spring-Animated Dropdown Menus")
+                    .subtitle("4-state micro-interactions, continuous open expansion, sliding item highlight, and Vim navigation")
+                    .palette(palette)
+                    .show(ui, |ui| {
+                        ui.label("Cluster Deployment Region (Primary Variant):");
+                        Dropdown::new(
+                            &mut state.demo_region,
+                            vec![
+                                DropdownOption::new(DemoRegion::UsEast, "US-East (Virginia)").icon("🇺🇸").subtitle("Ping: 24ms"),
+                                DropdownOption::new(DemoRegion::EuCentral, "EU-Central (Frankfurt)").icon("🇩🇪").subtitle("Ping: 82ms"),
+                                DropdownOption::new(DemoRegion::ApSouth, "AP-South (Mumbai)").icon("🇮🇳").subtitle("Ping: 110ms").badge("Fast"),
+                                DropdownOption::new(DemoRegion::SaEast, "SA-East (São Paulo)").icon("🇧🇷").subtitle("Ping: 160ms"),
+                            ],
+                        )
+                        .primary()
+                        .palette(palette)
+                        .spring_params(custom_spring_params)
+                        .with_state(&mut state.demo_region_dropdown_state)
+                        .show(ui);
+
+                        ui.add_space(8.0);
+                        ui.label("Logging Severity Filter (Outline Variant):");
+                        Dropdown::new(
+                            &mut state.demo_log_level,
+                            vec![
+                                DropdownOption::new(DemoLogLevel::Debug, "Debug").icon("🐛"),
+                                DropdownOption::new(DemoLogLevel::Info, "Info").icon("ℹ"),
+                                DropdownOption::new(DemoLogLevel::Warn, "Warn").icon("⚠"),
+                                DropdownOption::new(DemoLogLevel::Error, "Error").icon("🚨").badge("Alert"),
+                            ],
+                        )
+                        .outline()
+                        .palette(palette)
+                        .spring_params(custom_spring_params)
+                        .with_state(&mut state.demo_log_dropdown_state)
+                        .show(ui);
                     });
             }
 
@@ -802,7 +900,9 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                     i.consume_key(egui::Modifiers::SHIFT, egui::Key::Tab);
                 });
 
-                let dir_input = if state.focus_level.is_navigation() {
+                let is_dropdown_open = state.dash_nav.focused() == Some(&DropdownRegion) && state.demo_region_dropdown_state.is_open;
+
+                let dir_input = if state.focus_level.is_navigation() && !is_dropdown_open {
                     state.dash_key_handler.get_nav_direction(&ctx)
                         .or_else(|| state.dash_key_handler.handle_section_input(&ctx))
                 } else {
@@ -810,20 +910,22 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                 };
 
                 // 1. Direct Section Jumps via Ctrl+HJKL (Restores Last-Focused Widget in Target Section)
-                if let Some(sec_event) = state.dash_key_handler.handle_section_nav(
-                    &ctx,
-                    &mut state.dash_section_nav,
-                    &state.dash_section_graph,
-                ) {
-                    state.focus_level = FocusLevel::Navigation;
-                    ctx.memory_mut(|m| m.stop_text_input());
-                    let entry = state.last_section_widget[sec_event.current as usize];
-                    state.dash_nav.set_focus_with_graph(Some(entry), &state.dash_graph);
+                if !is_dropdown_open {
+                    if let Some(sec_event) = state.dash_key_handler.handle_section_nav(
+                        &ctx,
+                        &mut state.dash_section_nav,
+                        &state.dash_section_graph,
+                    ) {
+                        state.focus_level = FocusLevel::Navigation;
+                        ctx.memory_mut(|m| m.stop_text_input());
+                        let entry = state.last_section_widget[sec_event.current as usize];
+                        state.dash_nav.set_focus_with_graph(Some(entry), &state.dash_graph);
+                    }
                 }
 
                 // 2. 2-Pass Hierarchical Navigation (HJKL / Arrows without Ctrl)
-                // When actively focused inside a text input, skip UI navigation so HJKL keys operate INSIDE the text buffer!
-                if state.focus_level.is_navigation() {
+                // When actively focused inside a text input or open dropdown, skip UI navigation so HJKL keys operate INSIDE!
+                if state.focus_level.is_navigation() && !is_dropdown_open {
                     if let Some(dir) = state.dash_key_handler.get_nav_direction(&ctx) {
                         ctx.memory_mut(|m| m.stop_text_input());
                         if let Some(result) = hierarchical_move(
@@ -842,7 +944,7 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                 state.dash_scrolloff.record_nav_event(current_focused_node, dir_input);
 
                 // Shift+H / Shift+L — adjust slider values when focused on a slider
-                if state.focus_level.is_navigation() {
+                if state.focus_level.is_navigation() && !is_dropdown_open {
                     let focused = state.dash_nav.focused().copied();
                     let shift_dir = ctx.input(|i| {
                         if !i.modifiers.shift { return None; }
@@ -871,34 +973,46 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                 }
 
                 // Action keys (F/Enter, D, Q/Esc) — suppressed when actively focused in text input
-                let action = if state.focus_level.is_text_editing() {
-                    None
+                let primary_state = if state.focus_level.is_text_editing() {
+                    VimActionState::default()
                 } else {
-                    state.dash_key_handler.handle_action(&ctx)
+                    state.dash_key_handler.primary_action_state(&ctx)
+                };
+                let secondary_state = if state.focus_level.is_text_editing() {
+                    VimActionState::default()
+                } else {
+                    state.dash_key_handler.secondary_action_state(&ctx)
                 };
                 let focused = state.dash_nav.focused().copied();
+
+                let action = if primary_state.clicked || primary_state.double_clicked {
+                    Some(VimAction::PrimaryClick)
+                } else if secondary_state.clicked || secondary_state.double_clicked {
+                    Some(VimAction::SecondaryClick)
+                } else {
+                    ctx.input(|i| {
+                        if i.modifiers.ctrl {
+                            None
+                        } else if i.key_pressed(egui::Key::Escape) || i.key_pressed(egui::Key::Q) {
+                            Some(VimAction::Back)
+                        } else {
+                            None
+                        }
+                    })
+                };
 
                 if let Some(VimAction::Back) = action {
                     ctx.memory_mut(|m| m.stop_text_input());
                 }
 
-                // Handle non-button primary click actions (checkboxes, radios; switches handle triggered state internally)
-                if let Some(VimAction::PrimaryClick | VimAction::Enter) = action {
-                    match focused {
-                        Some(CheckNotify) => state.checkbox_newsletter = !state.checkbox_newsletter,
-                        Some(CheckMirror) => state.checkbox_telemetry = !state.checkbox_telemetry,
-                        Some(RadioDev) => state.radio_tier = 1,
-                        Some(RadioStaging) => state.radio_tier = 2,
-                        Some(RadioProd) => state.radio_tier = 3,
-                        _ => {}
-                    }
-                }
 
                 // ── 2. Layout Phase: render widgets, collect focused rect ──
                 let mut highlight_target: Option<Rect> = None;
                 let mut highlight_rounding = Rounding::same(6.0);
                 let mut section_target: Option<Rect> = None;
                 let section_rounding = Rounding::same(8.0);
+                let mut trigger_expand_scroll = false;
+                let mut expand_scroll_rect: Option<Rect> = None;
                 let active_section = state.dash_section_nav.focused().copied()
                     .unwrap_or(DashSection::CoreEngine);
                 let pointer_moved = ui.input(|i| i.pointer.delta() != Vec2::ZERO);
@@ -942,7 +1056,9 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                                 state.record_widget_focus(SearchInput);
                                 if resp.clicked() {
                                     state.focus_level = FocusLevel::TextEditing;
-                                    state.search_vim.mode = VimMode::Insert;
+                                    if !resp.double_clicked() && !resp.triple_clicked() && !state.search_vim.mode.is_visual() {
+                                        state.search_vim.mode = VimMode::Insert;
+                                    }
                                 }
                             }
                             if is_search_focused {
@@ -953,21 +1069,33 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                             ui.add_space(8.0);
 
                             let is_scan_focused = focused == Some(ScanButton);
-                            let is_scan_triggered = is_scan_focused && matches!(action, Some(VimAction::PrimaryClick | VimAction::Enter));
-                            let resp = Button::new("Scan Network")
+                            let is_scan_down = is_scan_focused && primary_state.is_down;
+                            let is_scan_triggered = is_scan_focused && (primary_state.clicked || primary_state.double_clicked);
+                            let scan_labels = ["Scan Network", "Scanning Endpoints...", "Scan Completed (32 Hosts Found)", "Reset Scan"];
+                            let scan_icons = ["📡", "⏳", "✓", "🔄"];
+                            let scan_text = scan_labels[state.scan_button_step % scan_labels.len()];
+                            let scan_icon = scan_icons[state.scan_button_step % scan_icons.len()];
+                            let resp = Button::new(scan_text)
                                 .primary()
-                                .icon("📡")
+                                .icon(scan_icon)
                                 .palette(palette)
                                 .spring_params(custom_spring_params)
                                 .id_source(egui::Id::new("dash_btn").with(ScanButton as u32))
                                 .focused(is_scan_focused)
+                                .pressed(is_scan_down)
                                 .triggered(is_scan_triggered)
                                 .show(ui);
                             if (resp.hovered() && pointer_moved) || resp.clicked() {
                                 state.record_widget_focus(ScanButton);
                             }
                             if resp.clicked() || is_scan_triggered {
-                                state.progress_value = 0.88;
+                                state.scan_button_step += 1;
+                                state.progress_value = match state.scan_button_step % 4 {
+                                    1 => 0.45,
+                                    2 => 1.0,
+                                    3 => 0.0,
+                                    _ => 0.88,
+                                };
                             }
                             if is_scan_focused {
                                 highlight_target = Some(resp.rect);
@@ -977,13 +1105,15 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                             ui.add_space(6.0);
 
                             let is_clear_focused = focused == Some(ClearButton);
-                            let is_clear_triggered = is_clear_focused && matches!(action, Some(VimAction::PrimaryClick | VimAction::Enter));
+                            let is_clear_down = is_clear_focused && primary_state.is_down;
+                            let is_clear_triggered = is_clear_focused && (primary_state.clicked || primary_state.double_clicked);
                             let resp = Button::new("Clear")
                                 .secondary()
                                 .palette(palette)
                                 .spring_params(custom_spring_params)
                                 .id_source(egui::Id::new("dash_btn").with(ClearButton as u32))
                                 .focused(is_clear_focused)
+                                .pressed(is_clear_down)
                                 .triggered(is_clear_triggered)
                                 .show(ui);
                             if (resp.hovered() && pointer_moved) || resp.clicked() {
@@ -1016,12 +1146,14 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                             .palette(palette)
                             .show(ui, |ui| {
                                 let is_turbo_focused = focused == Some(SwitchTurbo);
+                                let is_turbo_down = is_turbo_focused && primary_state.is_down;
                                 let is_turbo_triggered = is_turbo_focused && matches!(action, Some(VimAction::PrimaryClick | VimAction::Enter));
                                 let resp = Switch::new(&mut state.switch_turbo)
                                     .label("Turbo Mode")
                                     .palette(palette)
                                     .spring_params(custom_spring_params)
                                     .focused(is_turbo_focused)
+                                    .pressed(is_turbo_down)
                                     .triggered(is_turbo_triggered)
                                     .show(ui);
                                 if (resp.hovered() && pointer_moved) || resp.clicked() {
@@ -1030,12 +1162,14 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                                 if is_turbo_focused { highlight_target = Some(resp.rect); }
 
                                 let is_vpn_focused = focused == Some(SwitchVpn);
+                                let is_vpn_down = is_vpn_focused && primary_state.is_down;
                                 let is_vpn_triggered = is_vpn_focused && matches!(action, Some(VimAction::PrimaryClick | VimAction::Enter));
                                 let resp = Switch::new(&mut state.switch_vpn)
                                     .label("Secure Gateway Tunnel")
                                     .palette(palette)
                                     .spring_params(custom_spring_params)
                                     .focused(is_vpn_focused)
+                                    .pressed(is_vpn_down)
                                     .triggered(is_vpn_triggered)
                                     .show(ui);
                                 if (resp.hovered() && pointer_moved) || resp.clicked() {
@@ -1044,12 +1178,14 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                                 if is_vpn_focused { highlight_target = Some(resp.rect); }
 
                                 let is_analytics_focused = focused == Some(SwitchAnalytics);
+                                let is_analytics_down = is_analytics_focused && primary_state.is_down;
                                 let is_analytics_triggered = is_analytics_focused && matches!(action, Some(VimAction::PrimaryClick | VimAction::Enter));
                                 let resp = Switch::new(&mut state.switch_analytics)
                                     .label("Realtime Telemetry Ingestion")
                                     .palette(palette)
                                     .spring_params(custom_spring_params)
                                     .focused(is_analytics_focused)
+                                    .pressed(is_analytics_down)
                                     .triggered(is_analytics_triggered)
                                     .show(ui);
                                 if (resp.hovered() && pointer_moved) || resp.clicked() {
@@ -1137,7 +1273,8 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                                         (ProgressBtn100, "100%", 1.00),
                                     ] {
                                         let is_btn_focused = focused == Some(id);
-                                        let is_btn_triggered = is_btn_focused && matches!(action, Some(VimAction::PrimaryClick | VimAction::Enter));
+                                        let is_btn_down = is_btn_focused && primary_state.is_down;
+                                        let is_btn_triggered = is_btn_focused && (primary_state.clicked || primary_state.double_clicked);
                                         let is_active = (state.progress_value - val).abs() < 0.02;
                                         let mut btn = Button::new(label)
                                             .min_size(egui::vec2(52.0, 26.0))
@@ -1145,6 +1282,7 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                                             .spring_params(custom_spring_params)
                                             .id_source(egui::Id::new("dash_btn").with(id as u32))
                                             .focused(is_btn_focused)
+                                            .pressed(is_btn_down)
                                             .triggered(is_btn_triggered);
                                         if is_active {
                                             btn = btn.primary();
@@ -1197,12 +1335,91 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                                     state.record_widget_focus(TokenInput);
                                     if resp.clicked() {
                                         state.focus_level = FocusLevel::TextEditing;
-                                        state.token_vim.mode = VimMode::Insert;
+                                        if !resp.double_clicked() && !resp.triple_clicked() && !state.token_vim.mode.is_visual() {
+                                            state.token_vim.mode = VimMode::Insert;
+                                        }
                                     }
                                 }
                                 if is_token_focused {
                                     highlight_target = Some(resp.rect);
                                     highlight_rounding = Rounding::same(6.0);
+                                }
+
+                                ui.add_space(10.0);
+                                ui.label("Target Deployment Region:");
+                                let is_dd_focused = focused == Some(DropdownRegion);
+                                let is_dd_down = is_dd_focused && primary_state.is_down;
+                                let is_dd_triggered = is_dd_focused && (primary_state.clicked || primary_state.double_clicked);
+                                let resp = Dropdown::new(
+                                    &mut state.demo_region,
+                                    vec![
+                                        DropdownOption::new(DemoRegion::UsEast, "US-East (Virginia)")
+                                            .icon("🇺🇸")
+                                            .status_dot(palette.success)
+                                            .description("Primary production cluster")
+                                            .subtitle("24ms"),
+                                        DropdownOption::new(DemoRegion::UsWest, "US-West (Oregon)")
+                                            .icon("🇺🇸")
+                                            .status_dot(palette.success)
+                                            .description("Backup failover zone")
+                                            .subtitle("48ms"),
+                                        DropdownOption::new(DemoRegion::EuCentral, "EU-Central (Frankfurt)")
+                                            .icon("🇩🇪")
+                                            .status_dot(palette.success)
+                                            .description("GDPR compliant tier")
+                                            .subtitle("82ms"),
+                                        DropdownOption::new(DemoRegion::EuWest, "EU-West (Ireland)")
+                                            .icon("🇮🇪")
+                                            .status_dot(palette.warning)
+                                            .description("Scheduled maintenance")
+                                            .subtitle("75ms"),
+                                        DropdownOption::new(DemoRegion::ApSouth, "AP-South (Mumbai)")
+                                            .icon("🇮🇳")
+                                            .status_dot(palette.success)
+                                            .description("Direct peering node")
+                                            .subtitle("110ms")
+                                            .badge("Fast")
+                                            .badge_color(palette.accent),
+                                        DropdownOption::new(DemoRegion::ApNortheast, "AP-East (Tokyo)")
+                                            .icon("🇯🇵")
+                                            .status_dot(palette.success)
+                                            .description("Asia-Pacific relay")
+                                            .subtitle("135ms"),
+                                        DropdownOption::new(DemoRegion::SaEast, "SA-East (São Paulo)")
+                                            .icon("🇧🇷")
+                                            .status_dot(palette.danger)
+                                            .description("Degraded network routing")
+                                            .subtitle("160ms"),
+                                        DropdownOption::new(DemoRegion::AfSouth, "AF-South (Cape Town)")
+                                            .icon("🇿🇦")
+                                            .status_dot(palette.warning)
+                                            .description("Edge acceleration node")
+                                            .subtitle("195ms"),
+                                    ],
+                                )
+                                .primary()
+                                .width(310.0)
+                                .item_height(38.0)
+                                .auto_scroll(false)
+                                .palette(palette)
+                                .spring_params(custom_spring_params)
+                                .id_source(egui::Id::new("dash_dd").with(DropdownRegion as u32))
+                                .with_state(&mut state.demo_region_dropdown_state)
+                                .focused(is_dd_focused)
+                                .pressed(is_dd_down)
+                                .triggered(is_dd_triggered)
+                                .show(ui);
+                                if (resp.hovered() && pointer_moved) || resp.clicked() {
+                                    state.record_widget_focus(DropdownRegion);
+                                }
+                                let should_scroll = (resp.just_opened() || resp.is_navigating()) && !resp.is_fully_visible();
+                                if should_scroll {
+                                    trigger_expand_scroll = true;
+                                    expand_scroll_rect = Some(resp.expanded_rect());
+                                }
+                                if is_dd_focused {
+                                    highlight_target = Some(resp.highlight_rect());
+                                    highlight_rounding = Rounding::same(4.0);
                                 }
 
                                 ui.add_space(10.0);
@@ -1213,14 +1430,20 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                                         (RadioStaging, 2, "Staging"),
                                         (RadioProd, 3, "Production"),
                                     ] {
-                                        let resp = RadioButton::new(value, &mut state.radio_tier)
+                                        let is_radio_focused = focused == Some(id);
+                                        let is_radio_down = is_radio_focused && primary_state.is_down;
+                                        let is_radio_triggered = is_radio_focused && (primary_state.clicked || primary_state.double_clicked);
+                                        let resp = RadioButton::nullable(value, &mut state.radio_tier)
                                             .label(label)
                                             .palette(palette)
+                                            .focused(is_radio_focused)
+                                            .pressed(is_radio_down)
+                                            .triggered(is_radio_triggered)
                                             .show(ui);
                                         if (resp.hovered() && pointer_moved) || resp.clicked() {
                                             state.record_widget_focus(id);
                                         }
-                                        if focused == Some(id) {
+                                        if is_radio_focused {
                                             highlight_target = Some(resp.rect);
                                             highlight_rounding = Rounding::same(4.0);
                                         }
@@ -1232,28 +1455,40 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                                 ui.add_space(6.0);
 
                                 // Checkbox: Notify
+                                let is_notify_focused = focused == Some(CheckNotify);
+                                let is_notify_down = is_notify_focused && primary_state.is_down;
+                                let is_notify_triggered = is_notify_focused && (primary_state.clicked || primary_state.double_clicked);
                                 let resp = Checkbox::new(&mut state.checkbox_newsletter)
                                     .label("Auto-notify on deployment rollback")
                                     .palette(palette)
                                     .spring_params(custom_spring_params)
+                                    .focused(is_notify_focused)
+                                    .pressed(is_notify_down)
+                                    .triggered(is_notify_triggered)
                                     .show(ui);
                                 if (resp.hovered() && pointer_moved) || resp.clicked() {
                                     state.record_widget_focus(CheckNotify);
                                 }
-                                if focused == Some(CheckNotify) { highlight_target = Some(resp.rect); }
+                                if is_notify_focused { highlight_target = Some(resp.rect); }
 
                                 ui.add_space(4.0);
 
                                 // Checkbox: Mirror
+                                let is_mirror_focused = focused == Some(CheckMirror);
+                                let is_mirror_down = is_mirror_focused && primary_state.is_down;
+                                let is_mirror_triggered = is_mirror_focused && (primary_state.clicked || primary_state.double_clicked);
                                 let resp = Checkbox::new(&mut state.checkbox_telemetry)
                                     .label("Mirror replication to backup region")
                                     .palette(palette)
                                     .spring_params(custom_spring_params)
+                                    .focused(is_mirror_focused)
+                                    .pressed(is_mirror_down)
+                                    .triggered(is_mirror_triggered)
                                     .show(ui);
                                 if (resp.hovered() && pointer_moved) || resp.clicked() {
                                     state.record_widget_focus(CheckMirror);
                                 }
-                                if focused == Some(CheckMirror) { highlight_target = Some(resp.rect); }
+                                if is_mirror_focused { highlight_target = Some(resp.rect); }
                             });
                         if active_section == DashSection::Security {
                             section_target = Some(security_card_resp.rect.expand(2.0));
@@ -1270,21 +1505,31 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                             .palette(palette)
                             .show(ui, |ui| {
                                 ui.horizontal_wrapped(|ui| {
+                                    let deploy_labels = [
+                                        "Deploy Cluster",
+                                        "Deploying v2.4.0 to Production Tier...",
+                                        "Cluster Deployed (Active)",
+                                    ];
+                                    let deploy_label = deploy_labels[state.deploy_button_step % deploy_labels.len()];
+
                                     for (id, label, icon, style, prog_val) in [
-                                        (BtnDeploy, "Deploy Cluster", "🚀", "primary", Some(1.0f32)),
+                                        (BtnDeploy, deploy_label, "🚀", "primary", Some(1.0f32)),
                                         (BtnVerify, "Verify Status", "✓", "success", Some(0.95)),
                                         (BtnPurge, "Purge Cache", "🧹", "warning", Some(0.10)),
-                                        (BtnHalt, "Emergency Halt", "🛑", "danger", None),
+                                        (BtnHalt, "Halt Cluster", "🛑", "danger", Some(0.0)),
                                     ] {
                                         let is_btn_focused = focused == Some(id);
-                                        let is_btn_triggered = is_btn_focused && matches!(action, Some(VimAction::PrimaryClick | VimAction::Enter));
+                                        let is_btn_down = is_btn_focused && primary_state.is_down;
+                                        let is_btn_triggered = is_btn_focused && (primary_state.clicked || primary_state.double_clicked);
                                         let mut btn = Button::new(label)
                                             .icon(icon)
                                             .palette(palette)
                                             .spring_params(custom_spring_params)
                                             .id_source(egui::Id::new("dash_btn").with(id as u32))
                                             .focused(is_btn_focused)
+                                            .pressed(is_btn_down)
                                             .triggered(is_btn_triggered);
+
                                         btn = match style {
                                             "primary" => btn.primary(),
                                             "success" => btn.success(),
@@ -1297,6 +1542,9 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                                             state.record_widget_focus(id);
                                         }
                                         if resp.clicked() || is_btn_triggered {
+                                            if id == BtnDeploy {
+                                                state.deploy_button_step += 1;
+                                            }
                                             if let Some(v) = prog_val { state.progress_value = v; }
                                         }
                                         if is_btn_focused {
@@ -1366,12 +1614,24 @@ pub fn show(ui: &mut Ui, state: &mut WidgetsDemoState, palette: &ThemePalette) {
                     );
                 }
 
-                if let Some(target_rect) = highlight_target {
-                    state.dash_scrolloff.adjust_for_target(
-                        target_rect,
-                        ui.clip_rect(),
-                        ui.min_rect().height(),
-                    );
+                let is_dd_focused = state.dash_nav.focused() == Some(&DashboardWidget::DropdownRegion);
+
+                if trigger_expand_scroll {
+                    if let Some(exp_rect) = expand_scroll_rect {
+                        state.dash_scrolloff.ensure_visible(
+                            exp_rect,
+                            ui.clip_rect(),
+                            ui.min_rect().height(),
+                        );
+                    }
+                } else if !is_dd_focused {
+                    if let Some(target_rect) = highlight_target {
+                        state.dash_scrolloff.adjust_for_target(
+                            target_rect,
+                            ui.clip_rect(),
+                            ui.min_rect().height(),
+                        );
+                    }
                 }
 
                 state.dash_scrolloff.request_repaint_if_needed(ui.ctx());

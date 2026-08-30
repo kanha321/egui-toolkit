@@ -228,3 +228,101 @@ fn navigator_set_focus_manually() {
     nav.set_focus(None);
     assert_eq!(nav.focused(), None);
 }
+
+// ─── ActionTracker: Click-on-Release & Long-Press ──────────────────────────
+
+#[test]
+fn test_action_tracker_click_on_release() {
+    use egui_vim_nav::ActionTracker;
+
+    let mut tracker = ActionTracker::default();
+    let threshold = 0.6; // 600ms
+    let double_click_window = 0.3; // 300ms
+
+    // Frame 0: Key pressed down
+    let s0 = tracker.update(true, 1.0, threshold, double_click_window);
+    assert!(s0.is_down);
+    assert!(s0.just_pressed);
+    assert!(!s0.clicked);
+    assert!(!s0.just_released);
+    assert_eq!(s0.held_duration, 0.0);
+
+    // Frame 1..5: Held down for 100ms (simulate OS repeat flooding with true)
+    for i in 1..=5 {
+        let t = 1.0 + (i as f64) * 0.02;
+        let s = tracker.update(true, t, threshold, double_click_window);
+        assert!(s.is_down);
+        assert!(!s.just_pressed);
+        assert!(!s.clicked);
+        assert!(!s.just_released);
+        assert!((s.held_duration - (i as f32 * 0.02)).abs() < 0.001);
+    }
+
+    // Frame 6: Key released after 120ms
+    let s_rel = tracker.update(false, 1.12, threshold, double_click_window);
+    assert!(!s_rel.is_down);
+    assert!(s_rel.just_released);
+    assert!(s_rel.clicked); // Click fires strictly on release!
+    assert!(!s_rel.double_clicked);
+    assert!(!s_rel.long_pressed);
+
+    // Frame 7: Idle
+    let s_idle = tracker.update(false, 1.14, threshold, double_click_window);
+    assert!(!s_idle.is_down);
+    assert!(!s_idle.just_released);
+    assert!(!s_idle.clicked);
+}
+
+#[test]
+fn test_action_tracker_long_press_threshold() {
+    use egui_vim_nav::ActionTracker;
+
+    let mut tracker = ActionTracker::default();
+    let threshold = 0.5; // 500ms
+    let double_click_window = 0.3;
+
+    // Press down
+    tracker.update(true, 2.0, threshold, double_click_window);
+
+    // Hold for 400ms (below threshold)
+    let s_mid = tracker.update(true, 2.4, threshold, double_click_window);
+    assert!(s_mid.is_down);
+    assert!(!s_mid.long_pressed);
+
+    // Cross threshold at 500ms
+    let s_thresh = tracker.update(true, 2.5, threshold, double_click_window);
+    assert!(s_thresh.is_down);
+    assert!(s_thresh.long_pressed); // Long press fires when threshold reached!
+
+    // Continuing to hold past threshold does NOT refire long_pressed
+    let s_after = tracker.update(true, 2.6, threshold, double_click_window);
+    assert!(s_after.is_down);
+    assert!(!s_after.long_pressed);
+
+    // Release after long-press: does NOT fire click
+    let s_rel = tracker.update(false, 2.7, threshold, double_click_window);
+    assert!(!s_rel.is_down);
+    assert!(s_rel.just_released);
+    assert!(!s_rel.clicked); // Long press consumed the gesture, click does not fire
+}
+
+#[test]
+fn test_action_tracker_double_click() {
+    use egui_vim_nav::ActionTracker;
+
+    let mut tracker = ActionTracker::default();
+    let threshold = 0.6;
+    let double_click_window = 0.3; // 300ms
+
+    // Click 1: down at 1.0, up at 1.05
+    tracker.update(true, 1.0, threshold, double_click_window);
+    let s1 = tracker.update(false, 1.05, threshold, double_click_window);
+    assert!(s1.clicked);
+    assert!(!s1.double_clicked);
+
+    // Click 2: down at 1.15, up at 1.20 (within 300ms window)
+    tracker.update(true, 1.15, threshold, double_click_window);
+    let s2 = tracker.update(false, 1.20, threshold, double_click_window);
+    assert!(s2.double_clicked);
+}
+

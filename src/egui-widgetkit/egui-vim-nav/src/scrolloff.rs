@@ -180,6 +180,45 @@ impl<T: PartialEq + Clone> Scrolloff<T> {
         }
     }
 
+    /// Immediately adjusts the viewport scroll to ensure `target` is comfortably visible within `viewport`.
+    ///
+    /// Unlike `adjust_for_target`, which waits for `self.trigger_scrolloff`, `ensure_visible` evaluates
+    /// the target rect immediately against margins and sets the spring target if any overshoot exists.
+    /// Returns `true` if a scroll adjustment was initiated.
+    pub fn ensure_visible(&mut self, target: Rect, viewport: Rect, content_height: f32) -> bool {
+        let slack = (viewport.height() - target.height()).max(0.0);
+        let max_margin = slack * 0.5;
+        let margin_bottom = self.margin_bottom.min(max_margin).max(0.0);
+        let margin_top = self.margin_top.min(max_margin).max(0.0);
+
+        let overshoot_down = (target.bottom() - (viewport.bottom() - margin_bottom)).max(0.0);
+        let overshoot_up = ((viewport.top() + margin_top) - target.top()).max(0.0);
+
+        let delta = if target.height() > viewport.height() {
+            // Taller than viewport - align top with viewport top
+            -(viewport.top() - target.top())
+        } else if overshoot_down > 0.0 {
+            // Clipped at bottom: scroll down just enough to reveal bottom
+            overshoot_down
+        } else if overshoot_up > 0.0 {
+            // Clipped at top: scroll up just enough to reveal top
+            -overshoot_up
+        } else {
+            0.0
+        };
+
+        if delta != 0.0 {
+            let max_scroll = (content_height - viewport.height()).max(0.0);
+            let new_target = (self.offset_applied + delta).clamp(0.0, max_scroll);
+            if (new_target - self.target_offset).abs() > 0.5 {
+                self.target_offset = new_target;
+                self.spring.set_target(new_target);
+                return true;
+            }
+        }
+        false
+    }
+
     /// Returns `true` if the viewport scroll spring has settled at its target position.
     pub fn is_settled(&self) -> bool {
         self.spring.is_settled()

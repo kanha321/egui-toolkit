@@ -101,3 +101,23 @@ fn test_scrolloff_max_content_clamping() {
     scrolloff.adjust_for_target(target, viewport, content_height);
     assert_eq!(scrolloff.target_offset, 200.0); // clamped cleanly to 200.0
 }
+
+#[test]
+fn test_scrolloff_ensure_visible() {
+    let mut scrolloff = Scrolloff::<usize>::new().with_margins(50.0, 50.0);
+
+    let viewport = Rect::from_min_size(pos2(0.0, 0.0), vec2(400.0, 600.0));
+    // An expanded dropdown extending to Y=580 (within viewport 600, but past margin 550)
+    let expanded_target = Rect::from_min_size(pos2(10.0, 300.0), vec2(380.0, 280.0)); // bottom = 580.0
+    let content_height = 2000.0;
+
+    let adjusted = scrolloff.ensure_visible(expanded_target, viewport, content_height);
+    assert!(adjusted);
+    // Delta should be 580.0 - (600.0 - 50.0) = 30.0
+    assert_eq!(scrolloff.target_offset, 30.0);
+
+    // Calling it again when already visible with margin returns false
+    let target_in_view = Rect::from_min_size(pos2(10.0, 100.0), vec2(380.0, 200.0));
+    let adjusted2 = scrolloff.ensure_visible(target_in_view, viewport, content_height);
+    assert!(!adjusted2);
+}
