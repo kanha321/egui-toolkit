@@ -47,7 +47,13 @@ impl eframe::App for TestAppState {
                 ActiveScene::NavStack => nav_stack_demo::show(ui, &mut self.nav_stack_demo, &palette),
                 ActiveScene::Theme => theme_demo::show(ui, &mut self.theme),
                 ActiveScene::Widgets => widgets_demo::show(ui, &mut self.widgets_demo, &palette),
-                ActiveScene::Combined => combined_demo::show(ui),
+                ActiveScene::Combined => combined_demo::show(
+                    ui,
+                    &mut self.sidebar_expanded,
+                    &mut self.ribbon_expanded,
+                    &mut self.inspector_expanded,
+                    &mut self.combined_motion,
+                ),
             }
         });
 

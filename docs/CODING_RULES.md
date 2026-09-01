@@ -22,12 +22,14 @@ supplies, or it doesn't belong in egui-widgetkit at all.
 
 | Crate | May depend on | Must NOT depend on |
 |---|---|---|
-| `egui-layout` | `egui` | any other crate in this workspace, any app type (`test-app` included) |
+| `egui-layout` | `egui, spring-core` | any other crate in this workspace, any app type (`test-app` included) |
 | `spring-core` | *(nothing but small general-purpose crates)* | `egui`, any other crate in this workspace, any app type |
 | `egui-spring` | `spring-core`, `egui`, `egui-themes` | any app type |
 | `egui-vim-nav` | `egui` | any other crate in this workspace, any app type |
 | `egui-nav-stack` | `egui`; optionally `egui-spring` (behind `animated-transitions` feature, off by default) | `egui-layout`, `egui-vim-nav`, `egui-themes`, any app type |
 | `egui-themes` | `egui` | any other crate in this workspace, any app type |
+
+`egui-layout` is allowed to depend on `spring-core` because `spring-core` is pure math with zero `egui` dependency, providing the spring dynamics for resizing/collapsing.
 
 `egui-nav-stack` is the one exception to "each crate depends on `egui`
 only" — its optional feature depends on `egui-spring` the same way

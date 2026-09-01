@@ -16,7 +16,6 @@ pub enum ActiveScene {
     Combined,
 }
 
-#[derive(Default)]
 pub struct TestAppState {
     pub active_scene: ActiveScene,
     pub spring_demo: SpringDemoState,
@@ -25,4 +24,26 @@ pub struct TestAppState {
     pub widgets_demo: WidgetsDemoState,
     pub theme: ThemeState,
     pub cursor_autohide: egui_vim_nav::CursorAutohide,
+    pub sidebar_expanded: bool,
+    pub inspector_expanded: bool,
+    pub ribbon_expanded: bool,
+    pub combined_motion: spring_core::MotionPhysics,
+}
+
+impl Default for TestAppState {
+    fn default() -> Self {
+        Self {
+            active_scene: Default::default(),
+            spring_demo: Default::default(),
+            vim_nav_demo: Default::default(),
+            nav_stack_demo: Default::default(),
+            widgets_demo: Default::default(),
+            theme: Default::default(),
+            cursor_autohide: Default::default(),
+            sidebar_expanded: true,
+            inspector_expanded: true,
+            ribbon_expanded: true,
+            combined_motion: spring_core::MotionPhysics::Responsive,
+        }
+    }
 }

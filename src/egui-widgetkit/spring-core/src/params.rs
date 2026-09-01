@@ -53,11 +53,11 @@ impl SpringParams {
         }
     }
 
-    /// Fast, lively elastic spring with energetic bounce (`angular_frequency: 20.0`, `damping_ratio: 0.50`).
+    /// Fast, lively elastic spring with energetic bounce (`angular_frequency: 24.0`, `damping_ratio: 0.40`).
     pub const fn bouncy() -> Self {
         Self {
-            angular_frequency: 20.0,
-            damping_ratio: 0.50,
+            angular_frequency: 24.0,
+            damping_ratio: 0.40,
         }
     }
 
@@ -67,6 +67,19 @@ impl SpringParams {
             angular_frequency: 22.0,
             damping_ratio: 0.65,
         }
+    }
+
+    /// Fast, impactful spring dynamics with energetic elastic bounce (`angular_frequency: 26.0`, `damping_ratio: 0.44`).
+    pub const fn responsive() -> Self {
+        Self {
+            angular_frequency: 26.0,
+            damping_ratio: 0.44,
+        }
+    }
+
+    /// Alias for [`Self::responsive`].
+    pub const fn dropdown() -> Self {
+        Self::responsive()
     }
 
     /// Sets the angular frequency in radians per second.
@@ -92,6 +105,8 @@ pub enum MotionPhysics {
     Default,
     /// Smooth, cushioned movement with heavy damping ($\omega_0 = 18.0, \zeta = 0.90$).
     Gentle,
+    /// Responsive and impactful dynamics from dropdown morphing animations ($\omega_0 = 28.0, \zeta = 0.75$).
+    Responsive,
     /// Crisp, rapid target snap ($\omega_0 = 32.0, \zeta = 0.85$).
     Snappy,
     /// Energetic elastic bounce with overshoot ($\omega_0 = 20.0, \zeta = 0.35$).
@@ -119,6 +134,7 @@ impl MotionPhysics {
             Self::Off => None,
             Self::Default => Some(SpringParams::default()),
             Self::Gentle => Some(SpringParams::gentle()),
+            Self::Responsive => Some(SpringParams::responsive()),
             Self::Snappy => Some(SpringParams::snappy()),
             Self::Bouncy => Some(SpringParams::bouncy()),
             Self::OpenRGB => Some(SpringParams::openrgb()),
@@ -132,8 +148,9 @@ impl MotionPhysics {
             Self::Off => "Off (Instant)",
             Self::Default => "Default (20 / 0.50)",
             Self::Gentle => "Gentle (18 / 0.90)",
+            Self::Responsive => "Fast & Bouncy (26 / 0.44)",
             Self::Snappy => "Snappy (32 / 0.85)",
-            Self::Bouncy => "Bouncy (20 / 0.35)",
+            Self::Bouncy => "Bouncy (24 / 0.40)",
             Self::OpenRGB => "OpenRGB (22 / 0.65)",
             Self::Custom(_) => "Custom",
         }

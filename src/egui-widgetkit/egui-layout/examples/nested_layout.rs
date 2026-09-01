@@ -57,6 +57,7 @@ impl eframe::App for NestedLayoutApp {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             Split::horizontal()
+                .resizable(true)
                 .spacing(self.spacing)
                 // Left Column
                 .section(self.sidebar_fraction, |ui| {
@@ -65,6 +66,7 @@ impl eframe::App for NestedLayoutApp {
                 // Right Column (Nested vertical split)
                 .section(1.0 - self.sidebar_fraction, |ui| {
                     Split::vertical()
+                        .resizable(true)
                         .spacing(self.spacing)
                         .section(self.header_fraction, |ui| {
                             draw_card(ui, "Top Controls / Metrics", Color32::from_rgb(40, 44, 60));

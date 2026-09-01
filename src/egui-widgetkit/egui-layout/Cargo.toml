@@ -7,6 +7,7 @@ description = "Declarative, responsive nested split layouts for egui"
 
 [dependencies]
 egui = { workspace = true }
+spring-core = { path = "../spring-core" }  # Analytical spring physics for animated collapse/resize
 
 [dev-dependencies]
 eframe = { workspace = true }

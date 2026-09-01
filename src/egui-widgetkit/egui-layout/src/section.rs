@@ -1,25 +1,28 @@
 //! Declarative builder for individual layout sections.
 
 use egui::{Color32, Rect, Rounding, Stroke, Ui};
+use crate::collapse::{CollapseConfig, CollapseMode};
 use crate::size::Size;
 
 /// A builder representing a single configurable layout section.
 ///
 /// `Section` allows declarative configuration of primary and cross-axis sizing constraints,
 /// optional visual card framing (background, stroke, corner rounding, padding, headers),
-/// and UI content closures.
+/// optional collapse behavior, and UI content closures.
 ///
 /// # State Ownership
 ///
 /// `Section` is an ephemeral builder constructed and consumed per frame;
 /// it holds no global or static mutable state (`CODING_RULES §2`).
+/// Collapse state (`&mut bool`) is owned by the consuming application.
 ///
 /// # Examples
 ///
 /// ```rust
 /// use egui::{Color32, Stroke, Rounding};
-/// use egui_layout::Section;
+/// use egui_layout::{Section, CollapseMode};
 ///
+/// let mut expanded = true;
 /// let section = Section::fraction(0.33)
 ///     .min_size(150.0)
 ///     .card()
@@ -27,6 +30,8 @@ use crate::size::Size;
 ///     .bg(Color32::from_rgb(30, 32, 48))
 ///     .rounding(8.0)
 ///     .padding(10.0)
+///     .collapsible(&mut expanded, CollapseMode::FixedBar(40.0))
+///     .collapsed_content(|ui| { ui.button("📁"); })
 ///     .content(|ui| {
 ///         ui.label("Section content");
 ///     });
@@ -58,6 +63,18 @@ pub struct Section<'a> {
     /// Inner margin padding in logical points (default: 8.0 when card is enabled).
     pub padding: Option<f32>,
 
+    // ── Collapse ──
+
+    /// Collapse expanded state, owned by the consuming app.
+    /// `None` = this section is not collapsible.
+    /// `Some(&mut true)` = expanded, `Some(&mut false)` = collapsed.
+    pub collapse_expanded: Option<&'a mut bool>,
+    /// Collapse configuration (mode + chevron toggle).
+    pub collapse_config: Option<CollapseConfig>,
+    /// Content to render when this section is in its collapsed state.
+    /// Only called for `FixedBar` and `HeaderOnly` modes when collapsed.
+    pub collapsed_content: Option<Box<dyn FnOnce(&mut Ui) + 'a>>,
+
     /// Closure providing the inner UI contents.
     pub add_contents: Box<dyn FnOnce(&mut Ui) + 'a>,
     /// Optional callback receiving the exact allocated `Rect` for this section.
@@ -86,6 +103,9 @@ impl<'a> Section<'a> {
             stroke: None,
             rounding: None,
             padding: None,
+            collapse_expanded: None,
+            collapse_config: None,
+            collapsed_content: None,
             add_contents: Box::new(|_| {}),
             on_rect: None,
         }
@@ -212,6 +232,70 @@ impl<'a> Section<'a> {
     pub fn on_rect(mut self, on_rect: impl FnOnce(Rect) + 'a) -> Self {
         self.on_rect = Some(Box::new(on_rect));
         self
+    }
+
+    // ── Collapse ──
+
+    /// Makes this section collapsible with the given mode.
+    ///
+    /// `expanded` is a mutable reference to a `bool` the consuming app owns.
+    /// `true` = expanded (full content visible), `false` = collapsed.
+    ///
+    /// Automatically enables card mode and shows a chevron toggle in the header.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use egui_layout::{Section, CollapseMode};
+    ///
+    /// let mut sidebar_open = true;
+    /// let section = Section::fraction(0.25)
+    ///     .title("Sidebar")
+    ///     .collapsible(&mut sidebar_open, CollapseMode::FixedBar(40.0))
+    ///     .collapsed_content(|ui| {
+    ///         if ui.button("📁").clicked() { /* re-expand */ }
+    ///     })
+    ///     .content(|ui| { ui.label("Full sidebar tree"); });
+    /// ```
+    pub fn collapsible(mut self, expanded: &'a mut bool, mode: CollapseMode) -> Self {
+        self.is_card = true;
+        self.collapse_expanded = Some(expanded);
+        self.collapse_config = Some(CollapseConfig::new(mode));
+        self
+    }
+
+    /// Disables the automatic chevron toggle for this collapsible section.
+    ///
+    /// The app is then responsible for toggling the expanded `bool` itself
+    /// (e.g. via a custom button, keyboard shortcut, or programmatic logic).
+    pub fn no_chevron(mut self) -> Self {
+        if let Some(ref mut config) = self.collapse_config {
+            config.show_chevron = false;
+        }
+        self
+    }
+
+    /// Sets the content to render when this section is in its collapsed state.
+    ///
+    /// Only relevant for `CollapseMode::FixedBar` and `CollapseMode::HeaderOnly`.
+    /// For `CollapseMode::Hidden`, collapsed content is never shown.
+    pub fn collapsed_content(mut self, f: impl FnOnce(&mut Ui) + 'a) -> Self {
+        self.collapsed_content = Some(Box::new(f));
+        self
+    }
+
+    /// Returns `true` if this section is collapsible (has a collapse config).
+    pub fn is_collapsible(&self) -> bool {
+        self.collapse_config.is_some()
+    }
+
+    /// Returns `true` if this section is currently in its collapsed state.
+    /// Returns `false` for non-collapsible sections.
+    pub fn is_collapsed(&self) -> bool {
+        match &self.collapse_expanded {
+            Some(expanded) => !**expanded,
+            None => false,
+        }
     }
 
     /// Returns the minimum primary axis size required by this section.
