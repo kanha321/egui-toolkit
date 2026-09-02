@@ -798,17 +798,10 @@ impl<'a> Split<'a> {
         // ── 10. Render dividers (if resizable) ──
         if self.resizable && n > 1 {
             for i in 0..(n - 1) {
-                // Skip divider if either adjacent section is Hidden-collapsed and settled
-                let left_hidden = is_collapsed[i]
-                    && self.sections[i].collapse_config.as_ref()
-                        .map_or(false, |c| matches!(c.mode, CollapseMode::Hidden))
-                    && state.springs.get(i).map_or(true, |s| s.is_settled());
-                let right_hidden = is_collapsed[i + 1]
-                    && self.sections[i + 1].collapse_config.as_ref()
-                        .map_or(false, |c| matches!(c.mode, CollapseMode::Hidden))
-                    && state.springs.get(i + 1).map_or(true, |s| s.is_settled());
-
-                if left_hidden || right_hidden {
+                // Skip divider if either adjacent section is collapsed.
+                // A collapsed section must never be resizable (even if resizable is enabled on the Split)
+                // to prevent fighting the collapse solver and visual glitching.
+                if is_collapsed[i] || is_collapsed[i + 1] {
                     continue;
                 }
 

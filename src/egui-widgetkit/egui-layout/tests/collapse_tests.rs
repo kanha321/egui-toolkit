@@ -64,3 +64,37 @@ fn test_section_no_chevron() {
 
     assert_eq!(section.collapse_config.unwrap().show_chevron, false);
 }
+
+#[test]
+fn test_collapsed_section_disables_resizing_divider() {
+    use egui_layout::Split;
+
+    let mut collapsed = false;
+    let mut called_s1 = false;
+    let mut called_s2 = false;
+
+    egui::__run_test_ctx(|ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let split_id = egui::Id::new("test_split_collapse");
+
+            Split::horizontal()
+                .id_salt(split_id)
+                .resizable(true)
+                .add_section(
+                    Section::fraction(0.3)
+                        .collapsible(&mut collapsed, CollapseMode::FixedBar(40.0))
+                        .content(|_ui| {
+                            called_s1 = true;
+                        }),
+                )
+                .section(0.7, |_ui| {
+                    called_s2 = true;
+                })
+                .show(ui);
+        });
+    });
+
+    assert!(called_s2);
+    // When collapsed with FixedBar and no collapsed_content set, add_contents is dropped
+    assert!(!called_s1);
+}
